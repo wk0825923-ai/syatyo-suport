@@ -15223,20 +15223,68 @@ function FertilizerUsageHistoryPanel({ fertilizers, topDressingRecords, fields }
 // 作物カテゴリ管理ページ（汎用化）
 // categories: カテゴリ配列, onSave: setCropCategories
 // =====================================================
+
+// 代表的な作物の管理方式・収穫規格テンプレ（農場ごとに自由編集可）
+const CROP_TEMPLATES = {
+  'トマト':      { ui_mode:'standard',     harvest_grades:['秀品','優品','B品'],               color:'#DC2626' },
+  'ミニトマト':  { ui_mode:'standard',     harvest_grades:['秀品','優品','B品'],               color:'#EA580C' },
+  'キュウリ':    { ui_mode:'row_map',      harvest_grades:['秀品','優品','2L','L','M','B品'],  color:'#65A30D' },
+  'ナス':        { ui_mode:'row_map',      harvest_grades:['秀品','優品','B品'],               color:'#7C3AED' },
+  'ピーマン':    { ui_mode:'row_map',      harvest_grades:['秀品','優品','B品'],               color:'#16A34A' },
+  'レタス':      { ui_mode:'row_map',      harvest_grades:['規格内','B品'],                    color:'#0D9972' },
+  'ほうれん草':  { ui_mode:'row_map',      harvest_grades:['規格内','B品'],                    color:'#15803D' },
+  'キャベツ':    { ui_mode:'row_map',      harvest_grades:['秀品','優品','B品'],               color:'#65A30D' },
+  'ブロッコリー':{ ui_mode:'row_map',      harvest_grades:['L','M','S','B品'],                color:'#0D9972' },
+  'ネギ':        { ui_mode:'row_map',      harvest_grades:['秀品','優品','B品'],               color:'#B45309' },
+  '玉ねぎ':      { ui_mode:'standard',     harvest_grades:['2L','L','M','S','B品'],           color:'#B45309' },
+  'ニンジン':    { ui_mode:'standard',     harvest_grades:['2L','L','M','S','B品'],           color:'#EA580C' },
+  'じゃがいも':  { ui_mode:'standard',     harvest_grades:['2L','L','M','S','B品'],           color:'#B45309' },
+  'サツマイモ':  { ui_mode:'standard',     harvest_grades:['2L','L','M','S','B品'],           color:'#EA580C' },
+  'かぼちゃ':    { ui_mode:'standard',     harvest_grades:['規格内','B品'],                    color:'#EA580C' },
+  'スイカ':      { ui_mode:'standard',     harvest_grades:['大','中','小','B品'],              color:'#DC2626' },
+  'メロン':      { ui_mode:'standard',     harvest_grades:['秀品','優品','B品'],               color:'#65A30D' },
+  'イチゴ':      { ui_mode:'standard',     harvest_grades:['秀品','優品','B品'],               color:'#DC2626' },
+  'えだまめ':    { ui_mode:'row_map',      harvest_grades:['秀品','優品','B品'],               color:'#65A30D' },
+  'いんげん':    { ui_mode:'row_map',      harvest_grades:['秀品','B品'],                      color:'#0D9972' },
+  '大豆':        { ui_mode:'standard',     harvest_grades:['規格内','B品'],                    color:'#B45309' },
+  'そば':        { ui_mode:'growth_stage', harvest_grades:['規格内','B品'],                    color:'#6B7280' },
+  '小麦':        { ui_mode:'growth_stage', harvest_grades:['一等','二等','規格外'],            color:'#B45309' },
+  'とうもろこし':{ ui_mode:'row_map',      harvest_grades:['2L','L','M','S','B品'],           color:'#EA580C' },
+  '水稲':        { ui_mode:'growth_stage', harvest_grades:['一等米','二等米','くず米'],        color:'#2563EB' },
+  'もち米':      { ui_mode:'growth_stage', harvest_grades:['一等米','二等米','くず米'],        color:'#0891B2' },
+}
+const findCropTemplate = (name) => {
+  const key = Object.keys(CROP_TEMPLATES).find(k => name.includes(k) || k.includes(name))
+  return key ? CROP_TEMPLATES[key] : null
+}
+
 function CropCategoryPage({ categories, onSave }) {
   const UI_MODES = [
-    { key:'row_map',      label:'畝マップ',     desc:'畝ごとの播種・収穫記録・農薬散布管理' },
-    { key:'growth_stage', label:'生育ステージ', desc:'育苗〜登熟まで時系列で進捗管理（水稲など）' },
+    { key:'row_map',      label:'畝マップ',     desc:'畝ごとの播種・収穫・農薬散布を管理' },
+    { key:'growth_stage', label:'生育ステージ', desc:'育苗〜登熟まで時系列で進捗管理（水稲等）' },
     { key:'standard',     label:'シンプル',     desc:'作業記録のみのシンプルモード' },
   ]
   const PALETTE = ['#0D9972','#EA580C','#2563EB','#7C3AED','#B45309','#DC2626','#0891B2','#65A30D','#DB2777','#6B7280']
-  const blank = () => ({ key:'cat_' + Date.now(), name:'', ui_mode:'row_map', harvest_grades:['規格内','B品'], color:'#0D9972', sort_order: (categories.length * 10) })
-  const [editing, setEditing] = React.useState(null)   // null | category object (copy)
-  const [gradesText, setGradesText] = React.useState('')  // comma-separated grades input
+  const blank = () => ({ key:'cat_' + Date.now(), name:'', ui_mode:'row_map', harvest_grades:['規格内','B品'], color:'#0D9972', sort_order:(categories.length * 10) })
+  const [editing, setEditing]     = React.useState(null)
+  const [gradesText, setGradesText] = React.useState('')
+  const [suggestion, setSuggestion] = React.useState(null)  // テンプレ候補
 
-  const openNew  = () => { const c = blank(); setEditing(c); setGradesText(c.harvest_grades.join(', ')) }
-  const openEdit = (cat) => { setEditing({ ...cat }); setGradesText(cat.harvest_grades.join(', ')) }
-  const closeEdit = () => setEditing(null)
+  const openNew  = () => { const c = blank(); setEditing(c); setGradesText(c.harvest_grades.join(', ')); setSuggestion(null) }
+  const openEdit = (cat) => { setEditing({...cat}); setGradesText(cat.harvest_grades.join(', ')); setSuggestion(null) }
+  const closeEdit = () => { setEditing(null); setSuggestion(null) }
+
+  const handleNameChange = (name) => {
+    setEditing(p => ({...p, name}))
+    setSuggestion(name.length >= 2 ? findCropTemplate(name) : null)
+  }
+
+  const applySuggestion = () => {
+    if (!suggestion) return
+    setEditing(p => ({...p, ui_mode: suggestion.ui_mode, color: suggestion.color}))
+    setGradesText(suggestion.harvest_grades.join(', '))
+    setSuggestion(null)
+  }
 
   const saveEdit = () => {
     if (!editing.name.trim()) return
@@ -15252,54 +15300,53 @@ function CropCategoryPage({ categories, onSave }) {
   }
 
   const deleteCat = (key) => {
-    if (categories.length <= 1) return  // 最低1つは必要
+    if (categories.length <= 1) return
     onSave(categories.filter(c => c.key !== key))
   }
 
   const isBuiltin = (key) => ['leaf_veg','corn','rice','other'].includes(key)
 
-  const labelStyle = { fontSize:11, fontWeight:700, color:'#374151', display:'block', marginBottom:4, letterSpacing:'.06em', textTransform:'uppercase' }
-  const inpStyle   = { width:'100%', padding:'8px 10px', border:'1px solid #D8E0DA', borderRadius:6, fontSize:13, outline:'none', boxSizing:'border-box' }
+  const L = { fontSize:11, fontWeight:700, color:'#374151', display:'block', marginBottom:4, letterSpacing:'.06em', textTransform:'uppercase' }
+  const I = { width:'100%', padding:'8px 10px', border:'1px solid #D8E0DA', borderRadius:6, fontSize:13, outline:'none', boxSizing:'border-box' }
 
-  return React.createElement('div', { className:'page-wrap' },
-    React.createElement('div', { className:'page-header' },
+  return React.createElement('div', { className:'page' },
+    // ヘッダー
+    React.createElement('div', { style:{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:24 } },
       React.createElement('div', null,
         React.createElement('div', { className:'page-title' }, '作物カテゴリ管理'),
-        React.createElement('div', { className:'page-sub' }, '作物の種類ごとに管理UIと収穫規格を設定できます')
+        React.createElement('div', { className:'page-sub', style:{ marginBottom:0 } }, '作物の種類ごとに管理方式と収穫規格を設定します。農場のナレッジに合わせて自由に編集できます。')
       ),
-      React.createElement('button', { className:'btn btn-primary', onClick: openNew }, '+ カテゴリを追加')
+      React.createElement('button', { className:'btn btn-primary', onClick:openNew, style:{ flexShrink:0, marginLeft:16 } }, '+ カテゴリを追加')
     ),
 
-    // カテゴリ一覧
-    React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))', gap:16 } },
+    // カテゴリ一覧グリッド
+    React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:16 } },
       categories.map(cat =>
-        React.createElement('div', { key:cat.key, style:{ background:'#fff', border:'1.5px solid #E2E8E2', borderRadius:10, padding:16, position:'relative' } },
-          // カラーバー
-          React.createElement('div', { style:{ height:4, background:cat.color, borderRadius:4, marginBottom:12 } }),
-          // 名前 + キー
-          React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8, marginBottom:8 } },
+        React.createElement('div', { key:cat.key, style:{ background:'#fff', border:'1.5px solid #E2E8E2', borderRadius:10, padding:16, display:'flex', flexDirection:'column' } },
+          React.createElement('div', { style:{ height:4, background:cat.color, borderRadius:4, marginBottom:14 } }),
+          React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8, marginBottom:6 } },
             React.createElement('div', { style:{ width:10, height:10, borderRadius:'50%', background:cat.color, flexShrink:0 } }),
             React.createElement('div', { style:{ fontWeight:700, fontSize:14, color:'#111827' } }, cat.name),
-            React.createElement('div', { style:{ fontSize:10, color:'#94A3B8', background:'#F8FAFC', border:'1px solid #E2E8F0', borderRadius:4, padding:'1px 5px' } }, cat.key)
+            React.createElement('div', { style:{ fontSize:10, color:'#94A3B8', background:'#F8FAFC', border:'1px solid #E2E8F0', borderRadius:4, padding:'1px 5px', marginLeft:'auto' } }, cat.key)
           ),
-          // UIモード
           React.createElement('div', { style:{ fontSize:12, color:'#64748B', marginBottom:8 } },
             '管理方式: ',
             React.createElement('span', { style:{ fontWeight:600, color:'#0A6B52' } },
-              UI_MODES.find(m => m.key === cat.ui_mode)?.label || cat.ui_mode
+              (UI_MODES.find(m => m.key === cat.ui_mode) || UI_MODES[0]).label
             )
           ),
-          // 収穫規格
-          React.createElement('div', { style:{ display:'flex', flexWrap:'wrap', gap:4, marginBottom:12 } },
-            React.createElement('span', { style:{ fontSize:11, color:'#64748B', marginRight:4 } }, '規格:'),
+          React.createElement('div', { style:{ display:'flex', flexWrap:'wrap', gap:4, marginBottom:14, flex:1 } },
+            React.createElement('span', { style:{ fontSize:11, color:'#64748B', marginRight:2 } }, '規格:'),
             ...(cat.harvest_grades || []).map(g =>
               React.createElement('span', { key:g, style:{ fontSize:11, background:'#F1F5F9', border:'1px solid #E2E8F0', borderRadius:4, padding:'1px 6px', color:'#374151' } }, g)
             )
           ),
-          // 操作ボタン
           React.createElement('div', { style:{ display:'flex', gap:6 } },
-            React.createElement('button', { onClick:()=>openEdit(cat), style:{ flex:1, padding:'5px 0', background:'#F0F8F4', border:'1px solid #C6DDD0', borderRadius:6, fontSize:12, fontWeight:600, color:'#0A6B52', cursor:'pointer' } }, '✏ 編集'),
-            !isBuiltin(cat.key) && React.createElement('button', { onClick:()=>{ if(window.confirm(cat.name + 'を削除しますか？')) deleteCat(cat.key) }, style:{ padding:'5px 10px', background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:6, fontSize:12, fontWeight:600, color:'#DC2626', cursor:'pointer' } }, '✕')
+            React.createElement('button', { onClick:()=>openEdit(cat), style:{ flex:1, padding:'6px 0', background:'#F0F8F4', border:'1px solid #C6DDD0', borderRadius:6, fontSize:12, fontWeight:600, color:'#0A6B52', cursor:'pointer' } }, '✏ 編集'),
+            !isBuiltin(cat.key) && React.createElement('button', {
+              onClick:()=>{ if(window.confirm(cat.name + 'を削除しますか？')) deleteCat(cat.key) },
+              style:{ padding:'6px 12px', background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:6, fontSize:12, fontWeight:600, color:'#DC2626', cursor:'pointer' }
+            }, '✕')
           )
         )
       )
@@ -15307,39 +15354,53 @@ function CropCategoryPage({ categories, onSave }) {
 
     // ── 編集モーダル ──
     editing && React.createElement('div', { style:{ position:'fixed', inset:0, background:'rgba(0,0,0,.35)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:9999 }, onClick:e=>{ if(e.target===e.currentTarget) closeEdit() } },
-      React.createElement('div', { style:{ background:'#fff', borderRadius:12, padding:28, width:440, boxShadow:'0 8px 32px rgba(0,0,0,.18)', maxHeight:'90vh', overflowY:'auto' } },
-        React.createElement('div', { style:{ fontWeight:700, fontSize:16, color:'#111827', marginBottom:20 } }, isBuiltin(editing.key) ? '✏ カテゴリを編集' : '＋ 新しいカテゴリ'),
-
-        // カテゴリ名
-        React.createElement('label', { style:{ display:'block', marginBottom:14 } },
-          React.createElement('span', { style:labelStyle }, 'カテゴリ名 *'),
-          React.createElement('input', { style:inpStyle, value:editing.name, onChange:e=>setEditing(p=>({...p, name:e.target.value})), placeholder:'例: トマト' })
+      React.createElement('div', { style:{ background:'#fff', borderRadius:12, padding:28, width:460, boxShadow:'0 8px 32px rgba(0,0,0,.18)', maxHeight:'90vh', overflowY:'auto' } },
+        React.createElement('div', { style:{ fontWeight:700, fontSize:16, color:'#111827', marginBottom:20 } },
+          categories.find(c => c.key === editing.key) ? '✏ カテゴリを編集' : '＋ 新しいカテゴリ'
         ),
 
-        // UIモード
+        // カテゴリ名（テンプレ候補トリガー）
+        React.createElement('div', { style:{ marginBottom:14 } },
+          React.createElement('span', { style:L }, 'カテゴリ名 *'),
+          React.createElement('input', { style:I, value:editing.name, onChange:e=>handleNameChange(e.target.value), placeholder:'例: トマト, じゃがいも, そば …' }),
+          suggestion && React.createElement('div', {
+            style:{ marginTop:6, padding:'8px 10px', background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:6, display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 }
+          },
+            React.createElement('div', { style:{ fontSize:12, color:'#92400E' } },
+              React.createElement('span', { style:{ fontSize:13 } }, '💡 '),
+              React.createElement('strong', null, 'テンプレ候補: '),
+              (UI_MODES.find(m => m.key === suggestion.ui_mode) || UI_MODES[0]).label,
+              ' / ',
+              suggestion.harvest_grades.join(', ')
+            ),
+            React.createElement('button', { onClick:applySuggestion, style:{ padding:'3px 10px', background:'#D97706', color:'#fff', border:'none', borderRadius:5, fontSize:11, fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' } }, '適用')
+          )
+        ),
+
+        // 管理方式
         React.createElement('label', { style:{ display:'block', marginBottom:14 } },
-          React.createElement('span', { style:labelStyle }, '管理方式'),
-          React.createElement('select', { style:inpStyle, value:editing.ui_mode, onChange:e=>setEditing(p=>({...p, ui_mode:e.target.value})) },
+          React.createElement('span', { style:L }, '管理方式'),
+          React.createElement('select', { style:I, value:editing.ui_mode, onChange:e=>setEditing(p=>({...p, ui_mode:e.target.value})) },
             UI_MODES.map(m => React.createElement('option', { key:m.key, value:m.key }, m.label + ' — ' + m.desc))
           )
         ),
 
         // 収穫規格
         React.createElement('label', { style:{ display:'block', marginBottom:14 } },
-          React.createElement('span', { style:labelStyle }, '収穫規格（カンマ区切り）'),
-          React.createElement('input', { style:inpStyle, value:gradesText, onChange:e=>setGradesText(e.target.value), placeholder:'例: 2L, L, M, S, B品' })
+          React.createElement('span', { style:L }, '収穫規格（カンマ区切り）'),
+          React.createElement('input', { style:I, value:gradesText, onChange:e=>setGradesText(e.target.value), placeholder:'例: 2L, L, M, S, B品' })
         ),
 
         // カラー
-        React.createElement('div', { style:{ marginBottom:20 } },
-          React.createElement('span', { style:labelStyle }, 'カラー'),
-          React.createElement('div', { style:{ display:'flex', gap:8, flexWrap:'wrap' } },
-            PALETTE.map(c => React.createElement('button', { key:c, onClick:()=>setEditing(p=>({...p, color:c})), style:{ width:28, height:28, borderRadius:'50%', background:c, border: editing.color===c ? '3px solid #111827' : '2px solid #fff', cursor:'pointer', boxShadow:'0 0 0 1px #D1D5DB' } }))
+        React.createElement('div', { style:{ marginBottom:22 } },
+          React.createElement('span', { style:L }, 'カラー'),
+          React.createElement('div', { style:{ display:'flex', gap:8, flexWrap:'wrap', marginTop:4 } },
+            PALETTE.map(c => React.createElement('button', { key:c, onClick:()=>setEditing(p=>({...p, color:c})), style:{ width:30, height:30, borderRadius:'50%', background:c, border: editing.color===c ? '3px solid #111827' : '2px solid #fff', cursor:'pointer', boxShadow:'0 0 0 1.5px #D1D5DB' } }))
           )
         ),
 
         React.createElement('div', { style:{ display:'flex', gap:8 } },
-          React.createElement('button', { onClick:saveEdit, style:{ flex:1, padding:10, background:'#0A6B52', color:'#fff', border:'none', borderRadius:6, fontSize:14, fontWeight:600, cursor:'pointer' } }, '保存'),
+          React.createElement('button', { onClick:saveEdit, disabled:!editing.name.trim(), style:{ flex:1, padding:10, background: editing.name.trim() ? '#0A6B52' : '#9CA3AF', color:'#fff', border:'none', borderRadius:6, fontSize:14, fontWeight:600, cursor: editing.name.trim() ? 'pointer' : 'default' } }, '保存'),
           React.createElement('button', { onClick:closeEdit, style:{ padding:'10px 16px', background:'#F1F5F9', border:'1px solid #E2E8F0', borderRadius:6, fontSize:14, color:'#64748B', cursor:'pointer' } }, 'キャンセル')
         )
       )
