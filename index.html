@@ -17,6 +17,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <!-- ===== C-3: Excel出力用CDN ===== -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- ===== Supabase ===== -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
     /* ============================================================
@@ -427,6 +429,10 @@
 // CAT-01: CONFIG — マジックナンバー・ハードコード値の集約
 // テーマカラー・閾値・農園情報をここで一元管理
 // =====================================================
+const SUPABASE_URL      = 'https://jfalipljqvuzigmxzeoy.supabase.co'
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpmYWxpcGxqcXZ1emlnbXh6ZW95Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4MDc2ODcsImV4cCI6MjA5ODM4MzY4N30.Wqw8W3LBJetv0edidP8QJNuuQh0-sRjPgB9kXKmcvjA'
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+
 const CONFIG = {
   FARM_NAME:     '農場名',
   JGAP_CERT_NO:  'JGAP-XXXX-XXXXX',
@@ -1810,7 +1816,10 @@ function FieldAccordionItem({ f, isOpen, onChange, onDeleteTarget }) {
   )
 }
 
-function Sidebar({ current, onChange, fields, onAddField, onDeleteField }) {
+function Sidebar({ current, onChange, fields, onAddField, onDeleteField, currentOrg, currentFarm, availableFarms, onFarmChange, onSignOut, authUser }) {
+  const [farmMenuOpen, setFarmMenuOpen] = React.useState(false)
+  const isCorp    = currentOrg && currentOrg.type === 'corp'
+  const multiFarm = isCorp && availableFarms && availableFarms.length > 1
   // 現在の圃場IDとサブタブを解析
   const parseFieldPage = (p) => {
     if (!p.startsWith('field:')) return { fieldId: null, sub: null }
@@ -1831,10 +1840,23 @@ function Sidebar({ current, onChange, fields, onAddField, onDeleteField }) {
     )
 
   return React.createElement('nav', { className:'sidebar', style:{ display:'flex', flexDirection:'column', overflowY:'auto', overflowX:'hidden' } },
-    // ロゴ
-    React.createElement('div', { className:'sb-logo', style:{ flexShrink:0 } },
-      React.createElement('div', { className:'farm-name' }, '🌱 農場名'),
-      React.createElement('div', { className:'farm-sub'  }, '管理システム v1.0')
+    React.createElement('div', { className:'sb-logo', style:{ flexShrink:0, position:'relative' } },
+      React.createElement('div', { className:'farm-name' }, '🌱 ' + (currentFarm ? currentFarm.name : CONFIG.FARM_NAME)),
+      React.createElement('div', { className:'farm-sub'  }, isCorp ? (currentOrg.name + ' — 管理システム') : '農場管理システム v2.0'),
+      multiFarm && React.createElement('button', {
+        onClick: () => setFarmMenuOpen(o => !o),
+        style:{ position:'absolute', top:16, right:10, background:'#F0F8F4', border:'1px solid #C6DDD0', borderRadius:6, padding:'3px 8px', fontSize:11, fontWeight:600, color:'#0A6B52', cursor:'pointer' }
+      }, '切替 ▾'),
+      multiFarm && farmMenuOpen && React.createElement('div', {
+        style:{ position:'absolute', top:64, left:12, right:12, background:'#fff', border:'1px solid #DDE8DE', borderRadius:8, boxShadow:'0 4px 12px rgba(0,0,0,.12)', zIndex:1000 }
+      },
+        availableFarms.map(f =>
+          React.createElement('button', { key:f.id,
+            onClick: () => { onFarmChange(f); setFarmMenuOpen(false) },
+            style:{ display:'block', width:'100%', padding:'10px 14px', textAlign:'left', background:currentFarm.id===f.id?'#F0FDF4':'transparent', border:'none', borderBottom:'1px solid #F0F4F1', fontSize:13, fontWeight:currentFarm.id===f.id?700:500, color:currentFarm.id===f.id?'#0A6B52':'#374151', cursor:'pointer' }
+          }, (currentFarm.id === f.id ? '✓ ' : '') + f.name)
+        )
+      )
     ),
 
     // ── 上部固定：ダッシュボード ──
@@ -1890,6 +1912,14 @@ function Sidebar({ current, onChange, fields, onAddField, onDeleteField }) {
       ...NAV_SECTIONS_SYS.map(n => React.createElement(NavBtn, { key:n.id, item:n })),
     ),
 
+    // ── フッター: ユーザー情報 + サインアウト ──
+    React.createElement('div', { style:{ marginTop:'auto', padding:'12px 14px 14px', borderTop:'1px solid #DDE8DE', flexShrink:0 } },
+      authUser && React.createElement('div', { style:{ fontSize:11, color:'#94A3B8', marginBottom:8, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' } }, authUser.email),
+      React.createElement('button', {
+        onClick: onSignOut,
+        style:{ display:'flex', alignItems:'center', gap:6, background:'none', border:'1px solid #DDE8DE', borderRadius:6, padding:'6px 10px', fontSize:12, color:'#64748B', cursor:'pointer', width:'100%' }
+      }, React.createElement('i', { className:'ti ti-logout', style:{ fontSize:14 } }), 'ログアウト')
+    )
   )
 }
 
@@ -15179,55 +15209,212 @@ function usePersistState(key, initial) {
 </script>
 
 <!-- ============================================================
+     AUTH: 認証・テナント管理コンポーネント
+     ============================================================ -->
+<script>
+function LoadingScreen() {
+  return React.createElement('div', { style:{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100vh', background:'#FAFBFA', gap:16 } },
+    React.createElement('style', null, '@keyframes sb-spin{to{transform:rotate(360deg)}}'),
+    React.createElement('div', { style:{ width:44, height:44, border:'4px solid #E2E8E2', borderTop:'4px solid #0A6B52', borderRadius:'50%', animation:'sb-spin .8s linear infinite' } }),
+    React.createElement('p', { style:{ color:'#64748B', fontSize:14 } }, '読み込み中...')
+  )
+}
+
+function LoginScreen({ onAuth }) {
+  const [mode,     setMode]     = React.useState('login')
+  const [email,    setEmail]    = React.useState('')
+  const [password, setPassword] = React.useState('')
+  const [loading,  setLoading]  = React.useState(false)
+  const [error,    setError]    = React.useState('')
+  const [success,  setSuccess]  = React.useState('')
+  const inp  = { width:'100%', padding:'8px 12px', border:'1px solid #D8E0DA', borderRadius:6, fontSize:14, outline:'none', boxSizing:'border-box' }
+  const lbl  = { display:'block', marginBottom:14 }
+  const spn  = { fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:4 }
+  const handle = async (e) => {
+    e.preventDefault(); setLoading(true); setError(''); setSuccess('')
+    try {
+      if (mode === 'login') {
+        const { data, error:err } = await sb.auth.signInWithPassword({ email, password })
+        if (err) throw err; onAuth(data.user)
+      } else {
+        const { error:err } = await sb.auth.signUp({ email, password })
+        if (err) throw err
+        setSuccess('確認メールを送信しました。メールのリンクをクリック後にログインしてください。')
+      }
+    } catch(err) {
+      setError(err.message === 'Invalid login credentials' ? 'メールまたはパスワードが正しくありません' : err.message)
+    } finally { setLoading(false) }
+  }
+  return React.createElement('div', { style:{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', background:'#FAFBFA' } },
+    React.createElement('div', { style:{ background:'#fff', borderRadius:12, padding:40, width:360, boxShadow:'0 4px 24px rgba(10,107,82,.12)', border:'1px solid #DDE8DE' } },
+      React.createElement('div', { style:{ textAlign:'center', marginBottom:28 } },
+        React.createElement('div', { style:{ fontSize:36, marginBottom:8 } }, '🌱'),
+        React.createElement('h1', { style:{ fontSize:20, fontWeight:700, color:'#111827', margin:'0 0 4px' } }, '農場管理システム'),
+        React.createElement('p', { style:{ color:'#64748B', fontSize:13, margin:0 } }, mode === 'login' ? 'ログイン' : '新規登録')
+      ),
+      React.createElement('form', { onSubmit:handle },
+        React.createElement('label', { style:lbl }, React.createElement('span', { style:spn }, 'メールアドレス'), React.createElement('input', { type:'email', value:email, onChange:e=>setEmail(e.target.value), required:true, placeholder:'farm@example.com', style:inp })),
+        React.createElement('label', { style:{...lbl, marginBottom:20} }, React.createElement('span', { style:spn }, 'パスワード'), React.createElement('input', { type:'password', value:password, onChange:e=>setPassword(e.target.value), required:true, minLength:6, placeholder:'6文字以上', style:inp })),
+        error   && React.createElement('div', { style:{ background:'#FEF2F2', border:'1px solid #FCA5A5', borderRadius:6, padding:'8px 12px', marginBottom:12, fontSize:13, color:'#DC2626' } }, error),
+        success && React.createElement('div', { style:{ background:'#F0FDF4', border:'1px solid #86EFAC', borderRadius:6, padding:'8px 12px', marginBottom:12, fontSize:13, color:'#15803D' } }, success),
+        React.createElement('button', { type:'submit', disabled:loading, style:{ width:'100%', padding:10, background:loading?'#6EE7B7':'#0A6B52', color:'#fff', border:'none', borderRadius:6, fontSize:14, fontWeight:600, cursor:loading?'not-allowed':'pointer' } }, loading ? '処理中...' : (mode==='login' ? 'ログイン' : '登録する'))
+      ),
+      React.createElement('div', { style:{ textAlign:'center', marginTop:16 } },
+        React.createElement('button', { onClick:()=>{ setMode(mode==='login'?'signup':'login'); setError(''); setSuccess('') }, style:{ background:'none', border:'none', color:'#0A6B52', cursor:'pointer', fontSize:13, fontWeight:600 } }, mode==='login' ? 'アカウントをお持ちでない方はこちら' : 'すでにアカウントをお持ちの方')
+      )
+    )
+  )
+}
+
+function OnboardingScreen({ user, onComplete }) {
+  const [step,     setStep]     = React.useState(1)
+  const [orgType,  setOrgType]  = React.useState('solo')
+  const [orgName,  setOrgName]  = React.useState('')
+  const [farmName, setFarmName] = React.useState('')
+  const [jgapNo,   setJgapNo]   = React.useState('')
+  const [loading,  setLoading]  = React.useState(false)
+  const [error,    setError]    = React.useState('')
+  const inp = { width:'100%', padding:'8px 12px', border:'1px solid #D8E0DA', borderRadius:6, fontSize:14, boxSizing:'border-box', outline:'none' }
+  const lbl = { display:'block', marginBottom:14 }
+  const spn = { fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:4 }
+  const card = (sel) => ({ padding:20, border:`2px solid ${sel?'#0A6B52':'#E2E8E2'}`, borderRadius:8, background:sel?'#F0FDF4':'#fff', cursor:'pointer', textAlign:'left', width:'100%' })
+  const wrapStyle = { display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', background:'#FAFBFA' }
+  const boxStyle  = { background:'#fff', borderRadius:12, padding:40, boxShadow:'0 4px 24px rgba(10,107,82,.12)', border:'1px solid #DDE8DE' }
+  const handleCreate = async (e) => {
+    e.preventDefault(); setLoading(true); setError('')
+    try {
+      const { data:orgs, error:orgErr } = await sb.from('farm_organizations').insert({ name:orgName, type:orgType, jgap_cert_no:jgapNo }).select()
+      if (orgErr) throw orgErr
+      const org = orgs[0]
+      const { data:farms, error:farmErr } = await sb.from('farm_farms').insert({ org_id:org.id, name:(orgType==='solo' ? (farmName||orgName) : farmName), jgap_cert_no:jgapNo }).select()
+      if (farmErr) throw farmErr
+      onComplete(org, farms[0])
+    } catch(err) { setError(err.message) } finally { setLoading(false) }
+  }
+  if (step === 1) return React.createElement('div', { style:wrapStyle },
+    React.createElement('div', { style:{...boxStyle, width:500} },
+      React.createElement('div', { style:{ textAlign:'center', marginBottom:28 } }, React.createElement('div', { style:{fontSize:36,marginBottom:8} }, '🌱'), React.createElement('h2', { style:{fontSize:20,fontWeight:700,color:'#111827',margin:'0 0 4px'} }, 'ようこそ！'), React.createElement('p', { style:{color:'#64748B',fontSize:13,margin:0} }, '農場の管理形態を選択してください')),
+      React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:24 } },
+        React.createElement('button', { onClick:()=>setOrgType('solo'), style:card(orgType==='solo') }, React.createElement('div', { style:{fontSize:28,marginBottom:10} }, '🏡'), React.createElement('div', { style:{fontSize:14,fontWeight:700,color:'#111827',marginBottom:4} }, '個人・単一農場'), React.createElement('div', { style:{fontSize:12,color:'#64748B',lineHeight:1.5} }, '農家・個人事業主として1農場を管理')),
+        React.createElement('button', { onClick:()=>setOrgType('corp'), style:card(orgType==='corp') }, React.createElement('div', { style:{fontSize:28,marginBottom:10} }, '🏢'), React.createElement('div', { style:{fontSize:14,fontWeight:700,color:'#111827',marginBottom:4} }, '農業法人・組合'), React.createElement('div', { style:{fontSize:12,color:'#64748B',lineHeight:1.5} }, '複数農場を法人として一元管理'))
+      ),
+      React.createElement('button', { onClick:()=>setStep(2), style:{ width:'100%', padding:10, background:'#0A6B52', color:'#fff', border:'none', borderRadius:6, fontSize:14, fontWeight:600, cursor:'pointer' } }, '次へ →')
+    )
+  )
+  return React.createElement('div', { style:wrapStyle },
+    React.createElement('div', { style:{...boxStyle, width:440} },
+      React.createElement('button', { onClick:()=>setStep(1), style:{ background:'none', border:'none', color:'#0A6B52', cursor:'pointer', fontSize:13, marginBottom:16, padding:0 } }, '← 戻る'),
+      React.createElement('h2', { style:{ fontSize:18, fontWeight:700, color:'#111827', marginBottom:20 } }, orgType==='solo' ? '🏡 農場情報を入力' : '🏢 法人・農場情報を入力'),
+      React.createElement('form', { onSubmit:handleCreate },
+        React.createElement('label', { style:lbl }, React.createElement('span', { style:spn }, orgType==='solo' ? '農場名 *' : '法人名（組合名）*'), React.createElement('input', { type:'text', value:orgName, onChange:e=>setOrgName(e.target.value), required:true, placeholder:orgType==='solo'?'例: 田中農園':'例: 農事組合法人○○', style:inp })),
+        orgType==='corp' && React.createElement('label', { style:lbl }, React.createElement('span', { style:spn }, '最初の農場名 *'), React.createElement('input', { type:'text', value:farmName, onChange:e=>setFarmName(e.target.value), required:true, placeholder:'例: 第1農場', style:inp })),
+        React.createElement('label', { style:{...lbl, marginBottom:20} }, React.createElement('span', { style:spn }, 'JGAP認証番号（任意）'), React.createElement('input', { type:'text', value:jgapNo, onChange:e=>setJgapNo(e.target.value), placeholder:'JGAP-XXXX-XXXXX', style:inp })),
+        error && React.createElement('div', { style:{ background:'#FEF2F2', border:'1px solid #FCA5A5', borderRadius:6, padding:'8px 12px', marginBottom:12, fontSize:13, color:'#DC2626' } }, error),
+        React.createElement('button', { type:'submit', disabled:loading, style:{ width:'100%', padding:10, background:loading?'#6EE7B7':'#0A6B52', color:'#fff', border:'none', borderRadius:6, fontSize:14, fontWeight:600, cursor:loading?'not-allowed':'pointer' } }, loading ? '作成中...' : 'セットアップ完了 →')
+      )
+    )
+  )
+}
+
+function Root() {
+  const [authStatus,     setAuthStatus]     = React.useState('loading')
+  const [authUser,       setAuthUser]       = React.useState(null)
+  const [currentOrg,     setCurrentOrg]     = React.useState(null)
+  const [currentFarm,    setCurrentFarm]    = React.useState(null)
+  const [availableFarms, setAvailableFarms] = React.useState([])
+  const loadTenantContext = React.useCallback(async (user) => {
+    try {
+      const { data:members } = await sb.from('farm_members').select('org_id, role, farm_ids, farm_organizations(id, name, type, jgap_cert_no)').eq('user_id', user.id).limit(1)
+      if (!members || members.length === 0) { setAuthStatus('onboarding'); return }
+      const org = members[0].farm_organizations
+      setCurrentOrg(org)
+      const { data:farms } = await sb.from('farm_farms').select('*').eq('org_id', org.id).order('created_at')
+      if (!farms || farms.length === 0) { setAuthStatus('onboarding'); return }
+      setAvailableFarms(farms)
+      const savedId = localStorage.getItem('last_farm_' + org.id)
+      const farm = farms.find(f => f.id === savedId) || farms[0]
+      setCurrentFarm(farm)
+      setAuthStatus('ready')
+    } catch(err) { console.error('tenant ctx:', err); setAuthStatus('unauthenticated') }
+  }, [])
+  React.useEffect(() => {
+    sb.auth.getSession().then(({ data:{ session } }) => {
+      if (!session) { setAuthStatus('unauthenticated'); return }
+      setAuthUser(session.user); loadTenantContext(session.user)
+    })
+    const { data:{ subscription } } = sb.auth.onAuthStateChange((event, session) => {
+      if (!session) { setAuthStatus('unauthenticated'); setAuthUser(null); setCurrentOrg(null); setCurrentFarm(null) }
+    })
+    return () => subscription.unsubscribe()
+  }, [loadTenantContext])
+  const handleFarmChange = (farm) => {
+    setCurrentFarm(farm)
+    if (currentOrg) localStorage.setItem('last_farm_' + currentOrg.id, farm.id)
+  }
+  if (authStatus === 'loading')         return React.createElement(LoadingScreen)
+  if (authStatus === 'unauthenticated') return React.createElement(LoginScreen, { onAuth:(u)=>{ setAuthUser(u); loadTenantContext(u) } })
+  if (authStatus === 'onboarding')      return React.createElement(OnboardingScreen, { user:authUser, onComplete:(org, farm)=>{ setCurrentOrg(org); setCurrentFarm(farm); setAvailableFarms([farm]); setAuthStatus('ready') } })
+  return React.createElement(App, {
+    key:           currentFarm.id,
+    currentOrg,
+    currentFarm,
+    availableFarms,
+    authUser,
+    onFarmChange:  handleFarmChange,
+    onSignOut:     async () => { await sb.auth.signOut() },
+  })
+}
+</script>
+
+<!-- ============================================================
      ④ Appコンポーネント & アプリ起動
      編集対象: 画面ルーティング・状態管理の最上位
      ============================================================ -->
 <script>
-function App() {
-  const [authed,    setAuthed]   = React.useState(false)
-  const [authUser,  setAuthUser] = React.useState(null)
+function App({ currentOrg, currentFarm, availableFarms, authUser, onFarmChange, onSignOut }) {
+  const farmKey = currentFarm.id
+  CONFIG.FARM_NAME    = currentOrg.type === 'corp' ? currentOrg.name + ' / ' + currentFarm.name : (currentFarm.name || currentOrg.name)
+  CONFIG.JGAP_CERT_NO = currentFarm.jgap_cert_no || currentOrg.jgap_cert_no || 'JGAP-XXXX-XXXXX'
+  const useFPS = (k, i) => usePersistState(k + '_' + farmKey, i)
   const [page,      setPage]     = React.useState('dashboard')
-  // 【キー名変更】旧バージョンのブラウザキャッシュ（'farm_fields'）が
-  // 新しいINITIAL_FIELDS（row_count・とうもろこし等の作物追加済み）を上書きしてしまう問題への対応。
-  // キー名を変えることで、古いキャッシュとは無関係に新しい初期データが必ず読み込まれる。
-  const [fields,    setFields]   = usePersistState('farm_fields_v2',     INITIAL_FIELDS)
-  const [cropCycles, setCropCycles] = usePersistState('farm_crop_cycles', INITIAL_CROP_CYCLES)
-  const [records,   setRecords]  = usePersistState('farm_records',    INITIAL_RECORDS)
-  const [staff,     setStaff]    = usePersistState('farm_staff',      INITIAL_STAFF)
+  const [fields,    setFields]   = useFPS('farm_fields_v2',     INITIAL_FIELDS)
+  const [cropCycles, setCropCycles] = useFPS('farm_crop_cycles', INITIAL_CROP_CYCLES)
+  const [records,   setRecords]  = useFPS('farm_records',    INITIAL_RECORDS)
+  const [staff,     setStaff]    = useFPS('farm_staff',      INITIAL_STAFF)
   // 【実装手順書 A】技能実習生日誌
-  const [traineeDiaries, setTraineeDiaries] = usePersistState('farm_trainee_diaries', [])
-  const [gap,       setGap]      = usePersistState('farm_gap',        INITIAL_GAP_CHECKS)
-  const [rentals,   setRentals]  = usePersistState('farm_rentals',    INITIAL_RENTALS)
-  const [cropPlans, setCropPlans]= usePersistState('farm_crop_plans', INITIAL_CROP_PLANS)
-  const [todayTasks, setTodayTasks] = usePersistState('farm_today_tasks', INITIAL_TODAY_TASKS)
+  const [traineeDiaries, setTraineeDiaries] = useFPS('farm_trainee_diaries', [])
+  const [gap,       setGap]      = useFPS('farm_gap',        INITIAL_GAP_CHECKS)
+  const [rentals,   setRentals]  = useFPS('farm_rentals',    INITIAL_RENTALS)
+  const [cropPlans, setCropPlans]= useFPS('farm_crop_plans', INITIAL_CROP_PLANS)
+  const [todayTasks, setTodayTasks] = useFPS('farm_today_tasks', INITIAL_TODAY_TASKS)
 
   // ── 農薬在庫管理 state（Step①: 新規追加） ──
-  const [pesticides,        setPesticides]       = usePersistState('farm_pesticides',         INITIAL_PESTICIDES)
-  const [pesticideStock,    setPesticideStock]   = usePersistState('farm_pesticide_stock',    INITIAL_PESTICIDE_STOCK)
-  const [pesticidePurchases,setPesticidePurchases] = usePersistState('farm_pesticide_purchases', INITIAL_PESTICIDE_PURCHASES)
+  const [pesticides,        setPesticides]       = useFPS('farm_pesticides',         INITIAL_PESTICIDES)
+  const [pesticideStock,    setPesticideStock]   = useFPS('farm_pesticide_stock',    INITIAL_PESTICIDE_STOCK)
+  const [pesticidePurchases,setPesticidePurchases] = useFPS('farm_pesticide_purchases', INITIAL_PESTICIDE_PURCHASES)
 
   // ── 【サンプル農園実データ統合 フェーズ1・Step1-1】肥料マスタ・肥料在庫・肥料仕入れ・追肥記録 state ──
   // 既存のpesticides系stateとは完全に独立（混在させない）
-  const [fertilizers,         setFertilizers]         = usePersistState('farm_fertilizers',           INITIAL_FERTILIZERS)
-  const [fertilizerStock,     setFertilizerStock]     = usePersistState('farm_fertilizer_stock',      INITIAL_FERTILIZER_STOCK)
-  const [fertilizerPurchases, setFertilizerPurchases] = usePersistState('farm_fertilizer_purchases',  INITIAL_FERTILIZER_PURCHASES)
-  const [topDressingRecords,  setTopDressingRecords]  = usePersistState('farm_top_dressing_records',  INITIAL_TOP_DRESSING_RECORDS)
+  const [fertilizers,         setFertilizers]         = useFPS('farm_fertilizers',           INITIAL_FERTILIZERS)
+  const [fertilizerStock,     setFertilizerStock]     = useFPS('farm_fertilizer_stock',      INITIAL_FERTILIZER_STOCK)
+  const [fertilizerPurchases, setFertilizerPurchases] = useFPS('farm_fertilizer_purchases',  INITIAL_FERTILIZER_PURCHASES)
+  const [topDressingRecords,  setTopDressingRecords]  = useFPS('farm_top_dressing_records',  INITIAL_TOP_DRESSING_RECORDS)
 
 
   // ── 【フェーズE・E-4 Step4】ロット単位の農薬散布記録 state ──
-  const [lotSprayRecords, setLotSprayRecords] = usePersistState('farm_lot_spray_records', INITIAL_LOT_SPRAY_RECORDS)
+  const [lotSprayRecords, setLotSprayRecords] = useFPS('farm_lot_spray_records', INITIAL_LOT_SPRAY_RECORDS)
 
   // ── 【フェーズE・E-4 Step5】収穫記録（出荷先別ケース数）state ──
-  const [harvestRecords, setHarvestRecords] = usePersistState('farm_harvest_records', INITIAL_HARVEST_RECORDS)
+  const [harvestRecords, setHarvestRecords] = useFPS('farm_harvest_records', INITIAL_HARVEST_RECORDS)
 
   // ── 【実装手順書 Step2】出荷先マスタ state（SHIPMENT_DESTINATIONSを初期値にApp側で管理） ──
-  const [shipmentDestinations, setShipmentDestinations] = usePersistState('farm_shipment_destinations', SHIPMENT_DESTINATIONS)
+  const [shipmentDestinations, setShipmentDestinations] = useFPS('farm_shipment_destinations', SHIPMENT_DESTINATIONS)
 
   // ── 【フェーズE・E-4 Step6】圃場実績・評価 state（年度別・圃場別サマリー） ──
-  const [fieldPerformance] = usePersistState('farm_field_performance', INITIAL_FIELD_PERFORMANCE)
-  const [performanceComments, setPerformanceComments] = usePersistState('farm_field_performance_comments', INITIAL_FIELD_PERFORMANCE_COMMENTS)
+  const [fieldPerformance] = useFPS('farm_field_performance', INITIAL_FIELD_PERFORMANCE)
+  const [performanceComments, setPerformanceComments] = useFPS('farm_field_performance_comments', INITIAL_FIELD_PERFORMANCE_COMMENTS)
   // 品種（作物）別メモ。評価コメントと同様の仕組みでシーズン×品種単位にメモを保存
-  const [cropComments, setCropComments] = usePersistState('farm_crop_comments', [])
+  const [cropComments, setCropComments] = useFPS('farm_crop_comments', [])
 
   // =====================================================
   // 農薬在庫連動ヘルパー（3点セット）
@@ -15477,12 +15664,6 @@ function App() {
   const toggleTodayTask = id  => setTodayTasks(p => p.map(t => t.id===id ? {...t, done:!t.done} : t))
   const addTodayTask    = task => setTodayTasks(p => [...p, task])
 
-  if (!authed) {
-    return React.createElement(LoginScreen, {
-      onLogin: (user) => { setAuthUser(user); setAuthed(true) }
-    })
-  }
-
   const pageMap = {
     dashboard:         () => React.createElement(Dashboard,   { fields, records, staff, gap, todayTasks, onToggleTodayTask:toggleTodayTask, onAddTodayTask:addTodayTask, cropPlans, pesticides, pesticideStock, fertilizers, fertilizerStock, onNavigate: p => setPage(p), onSaveRecord: onSaveRecordWithStock, onUpdateRecord: onUpdateRecordWithStock, onDeleteRecord: onDeleteRecordWithStock }),
     record_list:       () => React.createElement(RecordTablePage, { records, fields, pesticides, onUpdate: onUpdateRecordWithStock, onDelete: onDeleteRecordWithStock, cropCycles, onUpdateRecordCycle }),
@@ -15582,10 +15763,14 @@ function App() {
       fields,
       onAddField:    f  => setFields(p => [...p, f]),
       onDeleteField: id => setFields(p => p.filter(f => f.id !== id)),
+      currentOrg,
+      currentFarm,
+      availableFarms,
+      onFarmChange,
+      onSignOut,
+      authUser,
     }),
-    React.createElement('main',  { className:'main' }, mainContent),
-    // 【サンプル農園実データ統合 Step2-2 動作確認用・一時パネル】
-    React.createElement(LotsStep2DebugPanel, { fields })
+    React.createElement('main',  { className:'main' }, mainContent)
   )
 }
 
@@ -15749,7 +15934,7 @@ function LotsStep2DebugPanel() {
 }
 const tdStyle2 = { padding:'2px 4px', borderBottom:'1px solid #f0f0f0' }
 
-ReactDOM.createRoot(document.getElementById('app')).render(React.createElement(App))
+ReactDOM.createRoot(document.getElementById('app')).render(React.createElement(Root))
 </script>
 </body>
 </html>
