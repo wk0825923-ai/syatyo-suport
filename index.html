@@ -8711,7 +8711,7 @@ function ConfirmDeleteModal({ title='削除しますか？', targetName, detail,
   )
 }
 
-function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavigate }) {
+function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavigate, cropCategories }) {
   const [showAdd,setShowAdd] = React.useState(false)
   // 地図クリックで新規圃場を登録する際の選択地点（モーダル表示トリガー）
   const [pendingLatLng, setPendingLatLng] = React.useState(null)
@@ -8959,10 +8959,10 @@ function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavi
 // CAT-05-3: FieldMapPage / FieldTablePage — FieldList から分割した専用コンポーネント
 // =====================================================
 function FieldMapPage({ fields, onAdd, onDelete, cropCycles, onNavigate, cropCategories }) {
-  return React.createElement(FieldList, { fields, onAdd, onDelete, mode:'map', cropCycles, onNavigate })
+  return React.createElement(FieldList, { fields, onAdd, onDelete, mode:'map', cropCycles, onNavigate, cropCategories })
 }
 function FieldTablePage({ fields, onAdd, onDelete, cropCycles, onNavigate, cropCategories }) {
-  return React.createElement(FieldList, { fields, onAdd, onDelete, mode:'list', cropCycles, onNavigate })
+  return React.createElement(FieldList, { fields, onAdd, onDelete, mode:'list', cropCycles, onNavigate, cropCategories })
 }
 
 // =====================================================
@@ -9046,7 +9046,8 @@ function FieldPerformancePage({ fields, harvestRecords, fieldPerformance, perfor
     const prev    = prevPerfByField[fid]
 
     // ── Step1 合計ケース数: 収穫記録優先、なければ静的データ ──
-    const total_cases    = comp ? comp.total_cases : (stat ? stat.total_cases : 0)
+    // ?? 0 で undefined（とうもろこし等ケース数管理外の作物）を 0 に正規化する
+    const total_cases    = comp ? (comp.total_cases ?? 0) : (stat ? (stat.total_cases ?? 0) : 0)
     // ── Step2 反収算出: 圃場面積で割る（1a = 1アール = 0.1反 → 10aあたり） ──
     const area_are       = field ? field.area_are : (stat ? stat.area_are : null)
     // 反収 = total_cases / (area_are / 10) = total_cases * 10 / area_are
@@ -15313,6 +15314,7 @@ function CropCategoryPage({ categories, onSave }) {
     // ヘッダー
     React.createElement('div', { style:{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:24 } },
       React.createElement('div', null,
+        React.createElement('div', { className:'eyebrow' }, 'CROP CATEGORIES'),
         React.createElement('div', { className:'page-title' }, '作物カテゴリ管理'),
         React.createElement('div', { className:'page-sub', style:{ marginBottom:0 } }, '作物の種類ごとに管理方式と収穫規格を設定します。農場のナレッジに合わせて自由に編集できます。')
       ),
