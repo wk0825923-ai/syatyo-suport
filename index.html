@@ -3802,6 +3802,69 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
     ? thisMonthRecords.length - lastMonthRecords.length
     : null
 
+  // ── 圃場が1件もない場合はオンボーディング画面を表示 ──
+  if (fields.length === 0) {
+    const steps = [
+      { icon:'plant-2', title:'作物カテゴリを確認・設定', desc:'葉物野菜・とうもろこし・水稲など、農場で扱う作物の種類と管理方式を設定します。', page:'crop_categories', btn:'カテゴリ管理へ' },
+      { icon:'map-pin',  title:'圃場を登録する',           desc:'管理する圃場を1筆ずつ登録します。地図上でピンを立てると面積・位置情報も記録できます。', page:'fields',          btn:'圃場一覧へ'   },
+      { icon:'clipboard-text', title:'作業記録を入力する', desc:'農薬散布・施肥・収穫などの日次作業を記録します。記録が積み上がるとダッシュボードに集計されます。', page:'daily_work', btn:'作業入力へ' },
+      { icon:'chart-bar', title:'収穫実績を確認する',      desc:'収穫記録が入力されると、反収・前年比などのKPIが自動集計されます。', page:'field_performance', btn:'実績ページへ' },
+    ]
+    return React.createElement('div', { className:'page' },
+      React.createElement('div', { className:'eyebrow' }, 'FARM OVERVIEW'),
+      React.createElement('div', { className:'page-title' }, 'ダッシュボード'),
+      React.createElement('div', { className:'page-sub' }, today),
+
+      // ウェルカムヒーロー
+      React.createElement('div', { style:{
+        background:'linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 100%)',
+        border:'1.5px solid #A7F3D0', borderRadius:14, padding:'32px 36px', marginBottom:28,
+        display:'flex', alignItems:'center', gap:24,
+      } },
+        React.createElement('div', { style:{ fontSize:52, lineHeight:1 } }, '🌱'),
+        React.createElement('div', null,
+          React.createElement('div', { style:{ fontSize:20, fontWeight:800, color:'#065F46', marginBottom:6 } }, 'ようこそ！農場管理を始めましょう'),
+          React.createElement('div', { style:{ fontSize:14, color:'#047857', lineHeight:1.7 } },
+            '圃場の登録から始めると、作業記録・農薬管理・収穫実績の自動集計まで一元管理できます。',
+            React.createElement('br', null),
+            '下のステップを順番に進めてください。'
+          )
+        )
+      ),
+
+      // ステップカード
+      React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:14 } },
+        steps.map((s, i) => React.createElement('div', {
+          key: s.page,
+          style:{ background:'#fff', border:'1.5px solid #E2E8E2', borderRadius:10, padding:20, display:'flex', flexDirection:'column', gap:12 }
+        },
+          React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:10 } },
+            React.createElement('div', { style:{
+              width:36, height:36, borderRadius:'50%', background:'#F0F8F4',
+              display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0
+            } },
+              React.createElement('i', { className:'ti ti-' + s.icon, style:{ fontSize:18, color:'#0A6B52' } })
+            ),
+            React.createElement('div', { style:{ fontSize:11, fontWeight:700, color:'#6B7280', letterSpacing:'.08em' } }, 'STEP ' + (i+1))
+          ),
+          React.createElement('div', { style:{ fontWeight:700, fontSize:14, color:'#111827' } }, s.title),
+          React.createElement('div', { style:{ fontSize:12, color:'#6B7280', lineHeight:1.6, flex:1 } }, s.desc),
+          React.createElement('button', {
+            onClick: () => onNavigate && onNavigate(s.page),
+            style:{
+              padding:'7px 0', background:'#0A6B52', color:'#fff', border:'none',
+              borderRadius:6, fontSize:12, fontWeight:600, cursor:'pointer', display:'flex',
+              alignItems:'center', justifyContent:'center', gap:4,
+            }
+          },
+            s.btn,
+            React.createElement('i', { className:'ti ti-arrow-right', style:{ fontSize:12 } })
+          )
+        ))
+      )
+    )
+  }
+
   return React.createElement('div', { className:'page' },
 
     // --- ページヘッダー ---
@@ -8773,7 +8836,20 @@ function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavi
       if (btn) btn.onclick = () => onNavigate && onNavigate('field:' + btn.getAttribute('data-field-id') + ':dashboard')
     })
   },[fields])
-  const listEl = React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))', gap:'12px' } },
+  const listEl = fields.length === 0
+    ? React.createElement('div', { style:{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'56px 24px', gap:14, textAlign:'center', background:'#fff', borderRadius:12, border:'1.5px dashed #C6DDD0' } },
+        React.createElement('div', { style:{ width:64, height:64, borderRadius:'50%', background:'#F0F8F4', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:4 } },
+          React.createElement('i', { className:'ti ti-map-pin', style:{ fontSize:28, color:'#0A6B52' } })
+        ),
+        React.createElement('div', { style:{ fontSize:16, fontWeight:700, color:'#111827' } }, 'まだ圃場が登録されていません'),
+        React.createElement('div', { style:{ fontSize:13, color:'#6B7280', maxWidth:320, lineHeight:1.7 } },
+          '圃場を登録すると作業記録・農薬管理・収穫実績の管理が始まります。',
+          React.createElement('br', null),
+          '地図上をクリックするか、右上のボタンから追加できます。'
+        ),
+        React.createElement('button', { className:'btn btn-primary', onClick:()=>setShowAdd(true) }, '+ 最初の圃場を登録する')
+      )
+    : React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))', gap:'12px' } },
     visibleFields.map(f => React.createElement('div', {
       key: f.id,
       onClick: () => onNavigate && onNavigate('field:' + f.id + ':dashboard'),
@@ -8972,7 +9048,7 @@ function FieldTablePage({ fields, onAdd, onDelete, cropCycles, onNavigate, cropC
 // 圃場面積(area_are)から反収(10aあたりケース数)を算出。
 // fieldPerformance(静的データ)を前シーズン参照として前年比を計算。
 // =====================================================
-function FieldPerformancePage({ fields, harvestRecords, fieldPerformance, performanceComments, onAddComment, cropComments, onAddCropComment, lotSprayRecords, topDressingRecords, pesticides, pesticidePurchases, fertilizers }) {
+function FieldPerformancePage({ fields, harvestRecords, fieldPerformance, performanceComments, onAddComment, cropComments, onAddCropComment, lotSprayRecords, topDressingRecords, pesticides, pesticidePurchases, fertilizers, cropCycles }) {
   // ── Step1: harvestRecordsからシーズン導出 ──
   // 月 >= 9 (秋〜冬) → `${year}-${year+1}`, 月 < 9 → `${year-1}-${year}`
   function deriveSeason(dateStr) {
@@ -9151,11 +9227,24 @@ function FieldPerformancePage({ fields, harvestRecords, fieldPerformance, perfor
   const filteredTotalWeight  = filteredRows.reduce((s, r) => s + (r.total_weight_kg || 0), 0)
   const hasStemsOrWeight     = filteredRows.some(r => r.total_stems != null || r.total_weight_kg != null)
 
-  // ── 作物別サマリー: 圃場マスタのcrop（レタス/ターサイ/水稲/とうもろこし等）でrowsをグループ化 ──
+  // ── 転作対応: そのシーズンに実際に栽培されていた作物をcropCyclesから引く ──
+  // season "2024-2025" のとき、年2024 or 2025 のcropCycleが対象。
+  // 見つからなければ圃場マスタのcrop（現在の作物）にフォールバック。
+  const getCropForSeason = (fieldId, seasonStr) => {
+    if (!cropCycles || !cropCycles.length || !seasonStr) return null
+    const parts = seasonStr.split('-').map(Number)
+    if (parts.length < 2 || isNaN(parts[0])) return null
+    const [y1, y2] = parts
+    const matches = cropCycles.filter(c => c.field_id === fieldId && (c.year === y1 || c.year === y2))
+    if (!matches.length) return null
+    return matches.reduce((a, b) => b.id > a.id ? b : a).crop || null
+  }
+
+  // ── 作物別サマリー: そのシーズンの作物でグループ化（転作圃場も正しく集計される） ──
   // 品種（varieties: オーウェン・アイゴ等）とは別の粒度。作物=栽培品目そのもの。
   const cropGroups = {}
   rows.forEach(r => {
-    const cropName = (r.field && r.field.crop) ? r.field.crop : '未分類'
+    const cropName = getCropForSeason(r.fid, season) || (r.field && r.field.crop) || '未分類'
     if (!cropGroups[cropName]) {
       cropGroups[cropName] = { crop: cropName, fieldCount: 0, total_cases: 0, prev_cases: 0, hasPrev: false, perAreSum: 0, perAreCount: 0 }
     }
@@ -9282,9 +9371,36 @@ function FieldPerformancePage({ fields, harvestRecords, fieldPerformance, perfor
     ),
 
     rows.length === 0
-      ? React.createElement('div', { className:'card', style:{ padding:'32px', textAlign:'center', color:'#6B7280', fontSize:'14px' } },
-          React.createElement('i', { className:'ti ti-chart-bar', style:{ fontSize:'28px', display:'block', marginBottom:'8px', color:'#CBD5E1' } }),
-          '実績データがありません。収穫記録を入力すると自動集計されます。'
+      ? React.createElement('div', { style:{
+          display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+          padding:'56px 24px', gap:14, textAlign:'center',
+          background:'#fff', borderRadius:12, border:'1.5px dashed #C6DDD0'
+        } },
+          React.createElement('div', { style:{ width:64, height:64, borderRadius:'50%', background:'#F0F8F4', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:4 } },
+            React.createElement('i', { className:'ti ti-chart-area', style:{ fontSize:28, color:'#0A6B52' } })
+          ),
+          React.createElement('div', { style:{ fontSize:16, fontWeight:700, color:'#111827' } }, '収穫記録がまだありません'),
+          React.createElement('div', { style:{ fontSize:13, color:'#6B7280', maxWidth:380, lineHeight:1.7 } },
+            '圃場詳細の「収穫」タブから収穫記録を入力すると、',
+            React.createElement('br', null),
+            '反収・前年比などのKPIがここに自動集計されます。'
+          ),
+          React.createElement('div', { style:{ display:'flex', gap:8 } },
+            React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'#6B7280', background:'#F8FAFC', border:'1px solid #E2E8F0', borderRadius:8, padding:'10px 16px' } },
+              React.createElement('i', { className:'ti ti-map-pin', style:{ fontSize:15, color:'#0A6B52' } }),
+              '①圃場一覧から圃場を選ぶ'
+            ),
+            React.createElement('i', { className:'ti ti-arrow-right', style:{ fontSize:14, color:'#CBD5E1' } }),
+            React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'#6B7280', background:'#F8FAFC', border:'1px solid #E2E8F0', borderRadius:8, padding:'10px 16px' } },
+              React.createElement('i', { className:'ti ti-basket', style:{ fontSize:15, color:'#0A6B52' } }),
+              '②「収穫」タブで記録する'
+            ),
+            React.createElement('i', { className:'ti ti-arrow-right', style:{ fontSize:14, color:'#CBD5E1' } }),
+            React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'#6B7280', background:'#F8FAFC', border:'1px solid #E2E8F0', borderRadius:8, padding:'10px 16px' } },
+              React.createElement('i', { className:'ti ti-chart-area', style:{ fontSize:15, color:'#0A6B52' } }),
+              '③ここに自動反映'
+            )
+          )
         )
       : React.createElement('div', null,
 
@@ -15967,6 +16083,7 @@ function App({ currentOrg, currentFarm, availableFarms, authUser, onFarmChange, 
       cropComments,
       onAddCropComment: (c) => setCropComments(prev => [...(prev||[]), c]),
       lotSprayRecords, topDressingRecords, pesticides, pesticidePurchases, fertilizers,
+      cropCycles,
     }),
   }
 
