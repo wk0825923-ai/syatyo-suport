@@ -48,6 +48,8 @@ const useFPS  = (k, i) => usePersistState(k + '_' + farmKey, i)
 | `farm_today_tasks` | ダッシュボードの今日のタスク |
 | `farm_gap` | GAP チェックリスト状態 |
 | `farm_monthly_temps` | 月別平均気温（収穫予測の積算温度に使用・長さ12） |
+| `farm_maintenance_records` | 機械整備記録（機械名・No・種別・結果・作業者・内容。GAP機械管理） |
+| `farm_shipment_records` | 出荷記録（収穫→ストック→出荷の分離。ストック残は収穫記録との差で計算） |
 
 その他 localStorage: `last_farm_<orgId>`（最後に選んだ農場）、`sb-*`（supabase-js の認証セッション）。
 
