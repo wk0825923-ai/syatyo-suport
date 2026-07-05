@@ -8315,15 +8315,15 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
     const list = (groups[fid] || []).slice().sort((a, b) => String(a.lot.transplant_date || '').localeCompare(String(b.lot.transplant_date || '')))
     const grpCases = list.reduce((a, e) => a + e.totalCases, 0)
     const grpCost  = list.reduce((a, e) => a + e.totalCost, 0)
-    return React.createElement('div', { key:'detail_'+fid, style:{ ...card, padding:0, marginTop:16, marginBottom:16, overflow:'hidden', border:'2px solid #0A6B52' } },
-      React.createElement('div', { style:{ padding:'12px 18px', background:'#F0FDF4', borderBottom:'1px solid #E5E7EB', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' } },
-        React.createElement('button', { onClick:()=>setSelectedFid(null), style:{ border:'none', background:'#fff', borderRadius:6, padding:'4px 10px', fontSize:12, fontWeight:700, color:'#6B7280', cursor:'pointer' } }, '← 一覧'),
-        React.createElement('span', { style:{ fontSize:15, fontWeight:800, color:'#0A6B52' } }, fieldLabel(f)),
-        f && f.crop ? React.createElement('span', { style:{ fontSize:12, color:'#fff', background:(f.color||'#6B7280'), borderRadius:6, padding:'2px 8px', fontWeight:700 } }, f.crop) : null,
+    return React.createElement('div', { key:'detail_'+fid, style:{ background:'#fff', borderRadius:14, width:'92vw', maxWidth:'1100px', maxHeight:'86vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(0,0,0,.25)' }, onClick:e=>e.stopPropagation() },
+      React.createElement('div', { style:{ padding:'14px 18px', background:'#F0FDF4', borderBottom:'1px solid #E5E7EB', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap', position:'sticky', top:0, zIndex:2 } },
+        React.createElement('span', { style:{ fontSize:16, fontWeight:800, color:'#0A6B52' } }, fieldLabel(f)),
+        f && f.crop ? React.createElement('span', { style:{ fontSize:12, color:'#64748B', fontWeight:600 } }, f.crop) : null,
         React.createElement('span', { style:{ fontSize:12, color:'#9CA3AF' } }, list.length + ' ロット'),
-        React.createElement('div', { style:{ marginLeft:'auto', display:'flex', gap:16, fontSize:13 } },
-          React.createElement('span', { style:{ color:'#6B7280' } }, '収穫 ', React.createElement('b', { style:{ color:'#0A6B52' } }, grpCases.toLocaleString()), ' ケース'),
+        React.createElement('div', { style:{ marginLeft:'auto', display:'flex', gap:16, fontSize:13, alignItems:'center' } },
+          React.createElement('span', { style:{ color:'#6B7280' } }, '収穫 ', React.createElement('b', { style:{ color:'#0F766E' } }, grpCases.toLocaleString()), ' ケース'),
           grpCost > 0 ? React.createElement('span', { style:{ color:'#6B7280' } }, '原価 ', React.createElement('b', { style:{ color:'#B45309' } }, '¥' + Math.round(grpCost).toLocaleString())) : null,
+          React.createElement('button', { onClick:()=>setSelectedFid(null), style:{ background:'none', border:'none', fontSize:'20px', color:'#9CA3AF', cursor:'pointer', lineHeight:1, padding:'0 2px' } }, '✕'),
         ),
       ),
       React.createElement('div', { style:{ overflowX:'auto' } },
@@ -8370,9 +8370,14 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
     )
   }
 
-  // ── 圃場タイルのグリッド（タップでその圃場の明細を開く） ──
-  const statusDot = (color, n, label) => n > 0 ? React.createElement('span', { key:label, style:{ display:'inline-flex', alignItems:'center', gap:3, fontSize:11, color:'#6B7280' } },
-    React.createElement('span', { style:{ width:8, height:8, borderRadius:'50%', background:color } }), n) : null
+  // ── 圃場タイルのグリッド（落ち着いた配色。タップでその圃場の明細をモーダル表示） ──
+  const statusText = (st) => {
+    const parts = []
+    if (st.cnt.growing)   parts.push('栽培中' + st.cnt.growing)
+    if (st.cnt.ready)     parts.push('収穫待ち' + st.cnt.ready)
+    if (st.cnt.harvested) parts.push('収穫済' + st.cnt.harvested)
+    return parts.join(' ・ ') || '—'
+  }
   const fieldGrid = React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(230px, 1fr))', gap:12 } },
     ...groupIds.map(fid => {
       const f = fields.find(x => x.id === fid)
@@ -8380,26 +8385,24 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
       const sel = selectedFid === fid
       return React.createElement('button', {
         key:fid,
-        onClick: () => setSelectedFid(sel ? null : fid),
-        style:{ textAlign:'left', cursor:'pointer', background:'#fff', border:'1px solid '+(sel?'#0A6B52':'#E5E7EB'), boxShadow: sel?'0 0 0 3px rgba(10,107,82,.15)':'0 1px 3px rgba(0,0,0,.04)', borderRadius:12, padding:'14px 16px', display:'flex', flexDirection:'column', gap:8, transition:'all .12s' },
+        onClick: () => setSelectedFid(fid),
+        style:{ textAlign:'left', cursor:'pointer', background:'#fff', border:'1px solid '+(sel?'#0A6B52':'#E5E7EB'), boxShadow:'0 1px 2px rgba(0,0,0,.04)', borderRadius:12, padding:'14px 16px', display:'flex', flexDirection:'column', gap:9, transition:'border-color .12s' },
       },
-        React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8 } },
-          React.createElement('span', { style:{ width:10, height:10, borderRadius:'50%', background:(f&&f.color)||'#6B7280', flexShrink:0 } }),
-          React.createElement('span', { style:{ fontSize:14, fontWeight:800, color:'#111827' } }, f ? f.name : '—'),
-          f && f.crop ? React.createElement('span', { style:{ marginLeft:'auto', fontSize:11, color:'#fff', background:(f.color||'#6B7280'), borderRadius:5, padding:'1px 7px', fontWeight:700 } }, f.crop) : null,
+        React.createElement('div', { style:{ display:'flex', alignItems:'baseline', gap:8 } },
+          React.createElement('span', { style:{ fontSize:14, fontWeight:700, color:'#111827' } }, f ? f.name : '—'),
+          f && f.crop ? React.createElement('span', { style:{ marginLeft:'auto', fontSize:11, color:'#94A3B8', fontWeight:600 } }, f.crop) : null,
         ),
         React.createElement('div', { style:{ display:'flex', alignItems:'baseline', gap:6 } },
-          React.createElement('span', { style:{ fontSize:22, fontWeight:800, color:'#0A6B52', lineHeight:1 } }, st.cases.toLocaleString()),
-          React.createElement('span', { style:{ fontSize:11, color:'#6B7280' } }, 'ケース収穫'),
-          st.cost > 0 ? React.createElement('span', { style:{ marginLeft:'auto', fontSize:12, color:'#B45309', fontWeight:700 } }, '¥' + Math.round(st.cost).toLocaleString()) : null,
+          React.createElement('span', { style:{ fontSize:22, fontWeight:800, color:'#0F766E', lineHeight:1 } }, st.cases.toLocaleString()),
+          React.createElement('span', { style:{ fontSize:11, color:'#94A3B8' } }, 'ケース収穫'),
+          st.cost > 0 ? React.createElement('span', { style:{ marginLeft:'auto', fontSize:12, color:'#94A3B8', fontWeight:600 } }, '¥' + Math.round(st.cost).toLocaleString()) : null,
         ),
-        React.createElement('div', { style:{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' } },
-          React.createElement('span', { style:{ fontSize:11, color:'#9CA3AF' } }, st.list.length + ' ロット'),
-          statusDot('#0D9972', st.cnt.growing, 'g'),
-          statusDot('#B45309', st.cnt.ready, 'r'),
-          statusDot('#1D4ED8', st.cnt.harvested, 'h'),
-          React.createElement('span', { style:{ marginLeft:'auto', fontSize:11, fontWeight:700, color:sel?'#0A6B52':'#9CA3AF' } }, sel ? '▼ 表示中' : 'タップで明細'),
+        React.createElement('div', { style:{ display:'flex', gap:8, alignItems:'center', fontSize:11, color:'#9CA3AF' } },
+          React.createElement('span', null, st.list.length + 'ロット'),
+          React.createElement('span', { style:{ color:'#CBD5E1' } }, '｜'),
+          React.createElement('span', null, statusText(st)),
         ),
+        React.createElement('div', { style:{ fontSize:11, fontWeight:700, color:'#0F766E' } }, '明細を見る →'),
       )
     })
   )
@@ -8420,8 +8423,12 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
     visible.length === 0
       ? React.createElement('div', { style:{ ...card, textAlign:'center', color:'#9CA3AF', fontSize:13, padding:'32px' } }, '該当するロットがありません（フィルタ条件を変更してください）')
       : fieldGrid,
-    validSelected ? renderFieldTable(selectedFid) : null,
     footNote,
+    // タップした圃場の明細はモーダルで（下に出て気づかない問題を解消）
+    validSelected ? React.createElement('div', {
+      style:{ position:'fixed', inset:0, background:'rgba(17,24,39,.45)', zIndex:2000, display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' },
+      onClick: () => setSelectedFid(null),
+    }, renderFieldTable(selectedFid)) : null,
   )
 }
 
