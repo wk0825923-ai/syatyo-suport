@@ -8086,11 +8086,30 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
     ;(farmLots[f.id] || []).forEach(lot => allLots.push({ ...lot, field: f, fieldId: f.id }))
   })
 
+  // ── 各記録を「1ロットだけ」に割り当てる（畝が重なる複数ロットへの二重計上を防ぐ）──
+  // 米→レタス転換のように旧作(畝1-12)と新作(畝1-6)が重なる場合、旧作の収穫が新ロットにも
+  // 紐付いて二重計上されるのを防ぐ。優先順: ①品種一致(収穫) ②起算日が記録日以前で最新のロット
+  // (散布/施肥の時系列) ③先頭。畝未指定(row_range空)はどのロットにも割り当てず末尾で件数警告。
+  const bucket = {}
+  allLots.forEach(l => { bucket[l.id] = { sprays: [], ferts: [], harvs: [] } })
+  const assignRecord = (rec, kind) => {
+    const set = parseRowRange(rec.row_range)
+    if (set.size === 0) return
+    const cands = allLots.filter(l => l.fieldId === rec.field_id && (() => { const ls = parseRowRange(l.row_range); for (const n of set) if (ls.has(n)) return true; return false })())
+    if (cands.length === 0) return
+    let chosen = rec.variety ? cands.find(l => l.variety === rec.variety) : null
+    if (!chosen && rec.date) chosen = cands.filter(l => l.transplant_date && String(l.transplant_date) <= String(rec.date)).sort((a, b) => String(b.transplant_date).localeCompare(String(a.transplant_date)))[0]
+    if (!chosen) chosen = cands[0]
+    bucket[chosen.id][kind].push(rec)
+  }
+  ;(harvestRecords || []).forEach(r => assignRecord(r, 'harvs'))
+  ;(lotSprayRecords || []).forEach(r => assignRecord(r, 'sprays'))
+  ;(topDressingRecords || []).forEach(r => assignRecord(r, 'ferts'))
+
   const enriched = allLots.map(lot => {
-    const lotSet = parseRowRange(lot.row_range)
-    const sprays = (lotSprayRecords || []).filter(r => r.field_id === lot.fieldId && overlaps(r.row_range, lotSet))
-    const ferts  = (topDressingRecords || []).filter(r => r.field_id === lot.fieldId && overlaps(r.row_range, lotSet))
-    const harvs  = (harvestRecords || []).filter(r => r.field_id === lot.fieldId && overlaps(r.row_range, lotSet))
+    const sprays = bucket[lot.id].sprays
+    const ferts  = bucket[lot.id].ferts
+    const harvs  = bucket[lot.id].harvs
     const totalCases   = harvs.reduce((a, r) => a + (r.total_cases || 0), 0)
     const harvestDates = harvs.map(r => r.date).filter(Boolean).sort()
     const s = seasonOf(lot.transplant_date) || seasonOf(lot.seed_date) || seasonOf(harvestDates[0]) || '未設定'
@@ -8176,7 +8195,7 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
   }
 
   // ── スタイル ──
-  const wrap = { padding:'28px 32px', maxWidth:'1200px', margin:'0 auto' }
+  const wrap = { padding:'24px 32px 48px', maxWidth:'none', margin:'0' }
   const card = { background:'#fff', border:'1px solid #E5E7EB', borderRadius:12, padding:'16px 18px' }
   const th = { padding:'10px 12px', fontSize:12, fontWeight:700, color:'#6B7280', textAlign:'left', whiteSpace:'nowrap', borderBottom:'2px solid #E5E7EB' }
   const td = { padding:'10px 12px', fontSize:13, color:'#111827', borderBottom:'1px solid #F1F5F9', verticalAlign:'middle' }
@@ -8268,11 +8287,17 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
   const tables = groupIds.map(fid => {
     const f = fields.find(x => x.id === fid)
     const list = (groups[fid] || []).slice().sort((a, b) => String(a.lot.transplant_date || '').localeCompare(String(b.lot.transplant_date || '')))
-    return React.createElement('div', { key:fid, style:{ ...card, padding:0, marginBottom:18, overflow:'hidden' } },
-      React.createElement('div', { style:{ padding:'12px 16px', background:'#F0FDF4', borderBottom:'1px solid #E5E7EB', display:'flex', alignItems:'center', gap:10 } },
-        React.createElement('span', { style:{ fontSize:14, fontWeight:800, color:'#0A6B52' } }, fieldLabel(f)),
-        f && f.crop ? React.createElement('span', { style:{ fontSize:12, color:'#6B7280' } }, f.crop) : null,
-        React.createElement('span', { style:{ fontSize:12, color:'#9CA3AF', marginLeft:'auto' } }, list.length + ' ロット'),
+    const grpCases = list.reduce((a, e) => a + e.totalCases, 0)
+    const grpCost  = list.reduce((a, e) => a + e.totalCost, 0)
+    return React.createElement('div', { key:fid, style:{ ...card, padding:0, marginBottom:16, overflow:'hidden' } },
+      React.createElement('div', { style:{ padding:'12px 18px', background:'#F0FDF4', borderBottom:'1px solid #E5E7EB', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' } },
+        React.createElement('span', { style:{ fontSize:15, fontWeight:800, color:'#0A6B52' } }, fieldLabel(f)),
+        f && f.crop ? React.createElement('span', { style:{ fontSize:12, color:'#fff', background:(f.color||'#6B7280'), borderRadius:6, padding:'2px 8px', fontWeight:700 } }, f.crop) : null,
+        React.createElement('span', { style:{ fontSize:12, color:'#9CA3AF' } }, list.length + ' ロット'),
+        React.createElement('div', { style:{ marginLeft:'auto', display:'flex', gap:16, fontSize:13 } },
+          React.createElement('span', { style:{ color:'#6B7280' } }, '収穫 ', React.createElement('b', { style:{ color:'#0A6B52' } }, grpCases.toLocaleString()), ' ケース'),
+          grpCost > 0 ? React.createElement('span', { style:{ color:'#6B7280' } }, '原価 ', React.createElement('b', { style:{ color:'#B45309' } }, '¥' + Math.round(grpCost).toLocaleString())) : null,
+        ),
       ),
       React.createElement('div', { style:{ overflowX:'auto' } },
         React.createElement('table', { style:{ width:'100%', borderCollapse:'collapse', minWidth:900 } },
@@ -8283,11 +8308,11 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
             ),
           ),
           React.createElement('tbody', null,
-            ...list.flatMap(e => {
+            ...list.flatMap((e, idx) => {
               const isOpen = expanded === e.lot.id
               const mainTr = React.createElement('tr', {
                 key:e.lot.id,
-                style:{ cursor:'pointer', background: isOpen ? '#F8FAFC' : '#fff' },
+                style:{ cursor:'pointer', background: isOpen ? '#EFF6FF' : (idx % 2 ? '#FAFCFB' : '#fff') },
                 onClick: () => setExpanded(isOpen ? null : e.lot.id),
               },
                 React.createElement('td', { style:{ ...td, fontWeight:700 } },
@@ -8389,7 +8414,7 @@ function HarvestForecastPage({ fields, farmLots, harvestRecords, cropCategories,
   }
 
   // ── スタイル ──
-  const wrap = { padding:'28px 32px', maxWidth:'1200px', margin:'0 auto' }
+  const wrap = { padding:'24px 32px 48px', maxWidth:'none', margin:'0' }
   const card = { background:'#fff', border:'1px solid #E5E7EB', borderRadius:12, padding:'16px 18px' }
   const th = { padding:'10px 12px', fontSize:12, fontWeight:700, color:'#6B7280', textAlign:'left', whiteSpace:'nowrap', borderBottom:'2px solid #E5E7EB' }
   const td = { padding:'10px 12px', fontSize:13, color:'#111827', borderBottom:'1px solid #F1F5F9', verticalAlign:'middle' }
@@ -8431,10 +8456,10 @@ function HarvestForecastPage({ fields, farmLots, harvestRecords, cropCategories,
   )
 
   // ── 予測テーブル ──
-  const progressBar = (pct, color) => React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8, minWidth:120 } },
-    React.createElement('div', { style:{ flex:1, height:8, background:'#F1F5F9', borderRadius:4, overflow:'hidden' } },
-      React.createElement('div', { style:{ height:'100%', width:pct + '%', background:color, borderRadius:4 } })),
-    React.createElement('span', { style:{ fontSize:11, color:'#6B7280', width:34, textAlign:'right' } }, pct + '%'),
+  const progressBar = (pct, color) => React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:10, minWidth:220 } },
+    React.createElement('div', { style:{ flex:1, height:12, background:'#EEF2F0', borderRadius:6, overflow:'hidden' } },
+      React.createElement('div', { style:{ height:'100%', width:pct + '%', background:color, borderRadius:6, transition:'width .4s ease' } })),
+    React.createElement('span', { style:{ fontSize:12, fontWeight:700, color:'#6B7280', width:40, textAlign:'right' } }, pct + '%'),
   )
 
   let body
