@@ -10,6 +10,10 @@
 > ⚠️ **引き継ぎ担当の方へ**: まず [ARCHITECTURE.md](./ARCHITECTURE.md)（構成・データモデル）と
 > [HANDOFF.md](./HANDOFF.md)（既知の課題・最初にやるべきこと）を必ず読んでください。
 > 特に「農場データが localStorage 保存である」点は本番化の最重要論点です。
+>
+> **ドキュメント一覧**: [ARCHITECTURE.md](./ARCHITECTURE.md)（構成・データモデル）｜
+> [HANDOFF.md](./HANDOFF.md)（負債と着手順）｜[COMPONENT_MAP.md](./COMPONENT_MAP.md)（components.js の機能→行範囲索引）｜
+> [MIGRATION.md](./MIGRATION.md)（Vite 移行手順）｜[qa/README.md](./qa/README.md)（E2E テスト）
 
 ---
 
