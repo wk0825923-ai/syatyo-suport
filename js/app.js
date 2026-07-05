@@ -371,14 +371,14 @@
   const addTodayTask    = task => setTodayTasks(p => [...p, task])
 
   const pageMap = {
-    dashboard:         () => React.createElement(Dashboard,   { fields, records, staff, gap, todayTasks, onToggleTodayTask:toggleTodayTask, onAddTodayTask:addTodayTask, cropPlans, pesticides, pesticideStock, fertilizers, fertilizerStock, lotSprayRecords, onNavigate: p => setPage(p), onSaveRecord: onSaveRecordWithStock, onUpdateRecord: onUpdateRecordWithStock, onDeleteRecord: onDeleteRecordWithStock }),
+    dashboard:         () => React.createElement(Dashboard,   { fields, records, staff, gap, todayTasks, onToggleTodayTask:toggleTodayTask, onAddTodayTask:addTodayTask, cropPlans, pesticides, pesticideStock, fertilizers, fertilizerStock, lotSprayRecords, maintenanceRecords, gapCtx:{ records, lotSprayRecords, pesticides, pesticidePurchases, topDressingRecords, fertilizerPurchases, harvestRecords, shipmentRecords, maintenanceRecords, staff, farmLots }, onNavigate: p => setPage(p), onSaveRecord: onSaveRecordWithStock, onUpdateRecord: onUpdateRecordWithStock, onDeleteRecord: onDeleteRecordWithStock }),
     record_list:       () => React.createElement(RecordTablePage, { records, fields, pesticides, onUpdate: onUpdateRecordWithStock, onDelete: onDeleteRecordWithStock, cropCycles, onUpdateRecordCycle }),
-    export:            () => React.createElement(GapExport,  { gap, onToggle:id=>setGap(p=>p.map(c=>c.id===id?{...c,is_cleared:!c.is_cleared}:c)), records, fields, pesticides }),
+    export:            () => React.createElement(GapExport,  { gap, onToggle:id=>setGap(p=>p.map(c=>c.id===id?{...c,is_cleared:!c.is_cleared}:c)), records, fields, pesticides, ctx:{ records, lotSprayRecords, pesticides, pesticidePurchases, topDressingRecords, fertilizerPurchases, harvestRecords, shipmentRecords, maintenanceRecords, staff, farmLots } }),
     field_map:         () => React.createElement(FieldMapPage,   { fields, onAdd:f=>{setFields(p=>[...p,f]);celebrateSave('圃場を追加！')}, onDelete:id=>setFields(p=>p.filter(f=>f.id!==id)), cropCycles, onNavigate:setPage, cropCategories }),
     fields:            () => React.createElement(FieldTablePage, { fields, onAdd:f=>{setFields(p=>[...p,f]);celebrateSave('圃場を追加！')}, onDelete:id=>setFields(p=>p.filter(f=>f.id!==id)), cropCycles, onNavigate:setPage, cropCategories }),
     crop_plan:         () => React.createElement(CropPlan,    { fields, plans:cropPlans, records, pesticides, onAdd:p=>{setCropPlans(prev=>[...prev,p]);celebrateSave('作付計画を追加！')}, onDelete:id=>setCropPlans(prev=>prev.filter(p=>p.id!==id)) }),
-    gap:               () => React.createElement(GapChecklist, { gap, onToggle:id=>setGap(p=>p.map(c=>c.id===id?{...c,is_cleared:!c.is_cleared}:c)) }),
-    gap_package:       () => React.createElement(GapExport,   { gap, onToggle:id=>setGap(p=>p.map(c=>c.id===id?{...c,is_cleared:!c.is_cleared}:c)), records, fields, pesticides }),
+    gap:               () => React.createElement(GapChecklist, { gap, onToggle:id=>setGap(p=>p.map(c=>c.id===id?{...c,is_cleared:!c.is_cleared}:c)), ctx:{ records, lotSprayRecords, pesticides, pesticidePurchases, topDressingRecords, fertilizerPurchases, harvestRecords, shipmentRecords, maintenanceRecords, staff, farmLots } }),
+    gap_package:       () => React.createElement(GapExport,   { gap, onToggle:id=>setGap(p=>p.map(c=>c.id===id?{...c,is_cleared:!c.is_cleared}:c)), records, fields, pesticides, ctx:{ records, lotSprayRecords, pesticides, pesticidePurchases, topDressingRecords, fertilizerPurchases, harvestRecords, shipmentRecords, maintenanceRecords, staff, farmLots } }),
     staff:             () => React.createElement(StaffList,   { staff, onAdd:s=>{setStaff(p=>[...p,s]);celebrateSave('スタッフを追加！')}, onDelete:id=>setStaff(p=>p.filter(s=>s.id!==id)), onUpdate:s=>setStaff(p=>p.map(x=>x.id===s.id?s:x)) }),
     // 【実装手順書 A】技能実習生 作業日誌
     trainee_diary:     () => React.createElement(TraineeDiaryPage, {
@@ -388,11 +388,7 @@
       onAdd:    d => { setTraineeDiaries(p => [...p, d]); celebrateSave('作業日誌を記録！') },
       onDelete: id => setTraineeDiaries(p => p.filter(d => d.id !== id)),
     }),
-    // 【機器管理】機器予約 + 機械整備記録 をタブ統合
-    equipment:         () => React.createElement(TabHubPage, { tabs: [
-      { key:'rental', label:'機器予約', render: () => React.createElement(Equipment, { rentals, onAdd:r=>{setRentals(p=>[...p,r]);celebrateSave('予約を追加！')}, onUpdate:r=>setRentals(p=>p.map(x=>x.id===r.id?r:x)), onDelete:id=>setRentals(p=>p.filter(r=>r.id!==id)) }) },
-      { key:'maint',  label:'整備記録', render: () => React.createElement(MaintenanceLogPage, { records: maintenanceRecords, staff, onSave: onAddMaintenance, onDelete: onDeleteMaintenance }) },
-    ] }),
+    equipment:         () => React.createElement(Equipment, { rentals, onAdd:r=>{setRentals(p=>[...p,r]);celebrateSave('予約を追加！')}, onUpdate:r=>setRentals(p=>p.map(x=>x.id===r.id?r:x)), onDelete:id=>setRentals(p=>p.filter(r=>r.id!==id)) }),
     simulator:         () => React.createElement(RevenueSimulator, null),
     manual:            () => React.createElement(ManualLibrary,    null),
     settings:          () => React.createElement(Settings,    null),

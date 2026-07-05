@@ -29,7 +29,8 @@ const NAV_SECTIONS_SYS = [
   { id:'staff',            label:'スタッフ管理',         icon:'users'       },
   { id:'trainee_diary',    label:'技能実習生 作業日誌', icon:'notebook'    },
   { id:'manual',           label:'多言語マニュアル',    icon:'book-2'      },
-  { id:'equipment',        label:'機器管理',            icon:'truck'       },  // 予約 + 整備記録
+  { id:'equipment',        label:'機器予約',            icon:'truck'       },
+  { id:'maintenance_log',  label:'機械整備記録',        icon:'tool'        },  // GAP機械管理・直アクセス
   { id:'simulator',        label:'収益シミュレーター',  icon:'currency-yen'},
   { id:'settings',         label:'設定',                icon:'settings'    },
 ]
@@ -2167,9 +2168,14 @@ function TodayTaskList({ tasks, fields, staff, onToggle, onAdd, onOpenRecord }) 
 }
 
 // ダッシュボード本体
-function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask, onAddTodayTask, cropPlans, pesticides, pesticideStock, fertilizers, fertilizerStock, lotSprayRecords, onNavigate, onSaveRecord, onUpdateRecord, onDeleteRecord }) {
+function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask, onAddTodayTask, cropPlans, pesticides, pesticideStock, fertilizers, fertilizerStock, lotSprayRecords, maintenanceRecords, gapCtx, onNavigate, onSaveRecord, onUpdateRecord, onDeleteRecord }) {
+  // 機械整備アラート: 要対応の記録、または直近60日整備記録なし（GAP機械点検の忘れ防止）
+  const _maint = maintenanceRecords || []
+  const _maintPending = _maint.filter(m => m.result === '要対応')
+  const _maintLast = _maint.map(m => m.date).filter(Boolean).sort().slice(-1)[0] || null
+  const _maintOverdue = !_maintLast || (Math.round((Date.now() - new Date(_maintLast)) / 86400000) > 60)
   // --- 集計 ---
-  const gapPct     = gap.length > 0 ? Math.round(gap.filter(c => c.is_cleared).length / gap.length * 100) : 0
+  const gapPct     = gap.length > 0 ? Math.round(gap.filter(c => c.is_cleared || isGapAutoCleared(c, gapCtx)).length / gap.length * 100) : 0
   const harvestRisks = calcHarvestRisk(records, cropPlans || [], pesticides || [], fields)
   const totalArea  = fields.reduce((a, f) => a + f.area_are, 0)
   const activeF    = fields.filter(f => f.status === '栽培中').length
@@ -2338,6 +2344,25 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
       React.createElement('div', { style:{ fontSize:'11px', color:'#94A3B8', marginTop:'6px', marginBottom:'12px', lineHeight:1.7 } },
         '※ 農薬マスタの「収穫前日数」と作付計画の収穫予定月から算出した参考情報です。',
         '実際の使用可否は必ず農薬ラベル（作物別の使用基準）で確認してください。'
+      )
+    ),
+
+    // --- 機械整備アラート（要対応 / しばらく整備記録なし）---
+    (_maintPending.length > 0 || _maintOverdue) && React.createElement('div', { style:{ marginBottom:'12px' } },
+      React.createElement(SectionTitle, { icon:'tool' }, '機械整備アラート'),
+      React.createElement('button', {
+        onClick: () => onNavigate && onNavigate('maintenance_log'),
+        style:{ display:'flex', alignItems:'center', gap:'12px', width:'100%', textAlign:'left', cursor:'pointer',
+          background: _maintPending.length ? '#FEF2F2' : '#FFFBEB', border:'1px solid ' + (_maintPending.length ? '#FECACA' : '#FDE68A'), borderRadius:'10px', padding:'12px 16px' },
+      },
+        React.createElement('i', { className:'ti ti-' + (_maintPending.length ? 'alert-triangle' : 'clock'), style:{ fontSize:'20px', color: _maintPending.length ? '#DC2626' : '#B45309', flexShrink:0 } }),
+        React.createElement('div', { style:{ flex:1 } },
+          React.createElement('div', { style:{ fontSize:'13px', fontWeight:700, color:'#111827' } },
+            _maintPending.length > 0 ? ('要対応の整備が ' + _maintPending.length + ' 件あります') : 'しばらく機械の点検記録がありません'),
+          React.createElement('div', { style:{ fontSize:'11px', color:'#6B7280', marginTop:'2px' } },
+            _maintPending.length > 0 ? _maintPending.map(m => m.machine_name).join('・') : ('最終整備: ' + (_maintLast || '記録なし') + '　— GAPの機械点検記録を残しましょう'))
+        ),
+        React.createElement('span', { style:{ fontSize:'12px', fontWeight:700, color:'#0A6B52', flexShrink:0 } }, '記録する →')
       )
     ),
 
@@ -9533,20 +9558,16 @@ function VisaPage({ staff, onAdd, onDelete }) {
 // =====================================================
 
 // ── 共通フック: GAP集計・PDF/Excel出力処理 ──────────────────
-function useGapBase({ gap, records, fields, pesticides }) {
-  // CAT-04-3: 初期値を {} から全カテゴリ false で明示化（初回クリック前の undefined 扱いを排除）
-  const [open, setOpen] = React.useState({
-    '農薬管理': false,
-    '労働安全': false,
-    '衛生管理': false,
-    '記録管理': false,
-  })
+function useGapBase({ gap, records, fields, pesticides, ctx }) {
+  const [open, setOpen] = React.useState({})
   const [exporting,  setExporting]     = React.useState(false)
 
+  // 自動達成（記録あり）または手動チェックで「達成」とみなす
+  const isDone     = (c) => c.is_cleared || isGapAutoCleared(c, ctx)
   const cats       = [...new Set(gap.map(c => c.category))]
   const total      = gap.length
-  const done       = gap.filter(c => c.is_cleared).length
-  const pct        = Math.round(done / total * 100)
+  const done       = gap.filter(isDone).length
+  const pct        = total ? Math.round(done / total * 100) : 0
   const sprayCount = records.filter(r => r.work_type === '農薬散布').length
 
   const handleExportPDF = async () => {
@@ -9560,7 +9581,7 @@ function useGapBase({ gap, records, fields, pesticides }) {
     catch(e) { alert('Excel出力に失敗しました: ' + e.message) }
   }
 
-  return { open, setOpen, exporting, cats, total, done, pct, sprayCount,
+  return { open, setOpen, exporting, cats, total, done, pct, sprayCount, isDone,
            handleExportPDF, handleExportExcel }
 }
 
@@ -9584,12 +9605,14 @@ function GapProgressBar({ done, total, pct }) {
 }
 
 // ── 共通UI: チェックリスト＋カテゴリ別進捗 ─────────────────
-function GapChecklistPanel({ gap, cats, open, setOpen, onToggle }) {
+function GapChecklistPanel({ gap, cats, open, setOpen, onToggle, ctx }) {
+  const auto = (c) => isGapAutoCleared(c, ctx)
+  const eff  = (c) => c.is_cleared || auto(c)
   return React.createElement('div',{className:'page-grow',style:{display:'grid',gridTemplateColumns:'1fr 280px',gap:'24px',alignItems:'start'}},
     React.createElement('div',null,
       ...cats.map(cat => {
         const items   = gap.filter(c => c.category === cat)
-        const catDone = items.filter(c => c.is_cleared).length
+        const catDone = items.filter(eff).length
         const isOpen  = open[cat]
         return React.createElement('div',{key:cat,className:'gap-check-cat'},
           React.createElement('div',{className:'gap-cat-hdr',onClick:()=>setOpen(o=>({...o,[cat]:!o[cat]}))},
@@ -9606,19 +9629,23 @@ function GapChecklistPanel({ gap, cats, open, setOpen, onToggle }) {
           ),
           React.createElement('div', { className: 'smooth-collapse-wrap' + (isOpen ? ' open' : '') },
             React.createElement('div', { className: 'smooth-collapse-inner' },
-            items.map(c => React.createElement('div',{key:c.id,className:'gap-item '+(c.is_cleared?'done':''),onClick:()=>onToggle(c.id)},
-            React.createElement('div', {
-              style: {
-                width:18, height:18, borderRadius:'4px',
-                border:'1px solid',
-                borderColor:  c.is_cleared ? CONFIG.COLOR.primary : '#CBD5E1',
-                background:   c.is_cleared ? CONFIG.COLOR.primary : 'transparent',
-                display:'flex', alignItems:'center', justifyContent:'center',
-                flexShrink:0, fontSize:12, color:'#0D9972'
-              }
-            }, c.is_cleared ? '✓' : ''),
-            React.createElement('span',null,c.item)
-          ))
+            items.map(c => {
+              const isAuto = auto(c) && !c.is_cleared
+              const checked = eff(c)
+              return React.createElement('div',{key:c.id,className:'gap-item '+(checked?'done':''),onClick:()=> isAuto ? null : onToggle(c.id), style: isAuto ? { cursor:'default' } : null },
+                React.createElement('div', {
+                  style: {
+                    width:18, height:18, borderRadius:'4px', border:'1px solid',
+                    borderColor:  checked ? CONFIG.COLOR.primary : '#CBD5E1',
+                    background:   checked ? CONFIG.COLOR.primary : 'transparent',
+                    display:'flex', alignItems:'center', justifyContent:'center',
+                    flexShrink:0, fontSize:12, color:'#fff'
+                  }
+                }, checked ? '✓' : ''),
+                React.createElement('span', { style:{ flex:1 } }, c.item),
+                isAuto ? React.createElement('span', { style:{ fontSize:10, fontWeight:700, color:'#0A6B52', background:'#ECFDF5', border:'1px solid #A7F3D0', borderRadius:5, padding:'1px 6px', flexShrink:0 } }, '自動✓ 記録あり') : null
+              )
+            })
           ) // end smooth-collapse-inner
           ) // end smooth-collapse-wrap
         )
@@ -9628,7 +9655,7 @@ function GapChecklistPanel({ gap, cats, open, setOpen, onToggle }) {
       React.createElement('div',{className:'section-title'},'カテゴリ別達成率'),
       ...cats.map(cat => {
         const items   = gap.filter(c => c.category === cat)
-        const catDone = items.filter(c => c.is_cleared).length
+        const catDone = items.filter(eff).length
         const catPct  = Math.round(catDone / items.length * 100)
         return React.createElement('div',{key:cat,className:'card-sm',style:{marginBottom:'8px'}},
           React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'6px'}},
@@ -9660,17 +9687,17 @@ function GapExportButtons({ exporting, sprayCount, handleExportPDF, handleExport
 }
 
 // ── GapChecklist: チェックリスト専用ページ（UX-06: 未完了タブ追加）─
-function GapChecklist({ gap, onToggle }) {
-  const { open, setOpen, done, total, pct, cats } = useGapBase({ gap, records:[], fields:[], pesticides:[] })
+function GapChecklist({ gap, onToggle, ctx }) {
+  const { open, setOpen, done, total, pct, cats, isDone } = useGapBase({ gap, records:[], fields:[], pesticides:[], ctx })
   // UX-06: タブ状態管理（'all' | 'incomplete'）
   const [activeTab, setActiveTab] = React.useState('all')
 
-  // 未完了件数（バッジ用）
-  const incompleteCount = gap.filter(c => !c.is_cleared).length
+  // 未完了件数（自動達成を除く）
+  const incompleteCount = gap.filter(c => !isDone(c)).length
 
   // タブに応じてフィルターしたgapリストを生成
   const filteredGap = activeTab === 'incomplete'
-    ? gap.filter(c => !c.is_cleared)
+    ? gap.filter(c => !isDone(c))
     : gap
 
   // 未完了タブ時は空カテゴリを除外
@@ -9763,7 +9790,7 @@ function GapChecklist({ gap, onToggle }) {
             'GAP申請の準備が整っています。帳票を出力して提出してください。'
           )
         )
-      : React.createElement(GapChecklistPanel,{ gap:filteredGap, cats:filteredCats, open, setOpen, onToggle })
+      : React.createElement(GapChecklistPanel,{ gap:filteredGap, cats:filteredCats, open, setOpen, onToggle, ctx })
   )
 }
 
@@ -9856,9 +9883,9 @@ function GapExportHero({ done, total, pct, sprayCount, onGenerateAll, isGenerati
 }
 
 // ── GapExport: 帳票出力 / 申請パッケージ専用ページ ─────────
-function GapExport({ gap, records, fields, pesticides }) {
+function GapExport({ gap, records, fields, pesticides, ctx }) {
   const { exporting, done, total, pct, sprayCount,
-          handleExportPDF, handleExportExcel } = useGapBase({ gap, records, fields, pesticides })
+          handleExportPDF, handleExportExcel } = useGapBase({ gap, records, fields, pesticides, ctx })
 
   const [isGenerating, setIsGenerating] = React.useState(false)
   const [justCompleted, setJustCompleted] = React.useState(false)

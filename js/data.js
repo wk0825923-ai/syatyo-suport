@@ -574,46 +574,75 @@ const CROP_PESTICIDE_MAP = {
 }
 const INITIAL_STAFF = []
 const INITIAL_RECORDS = []
+// GLOBALG.A.P. IFA（統合農場保証）／JGAP の主要管理点をベースにしたチェックリスト。
+// auto: システムに記録があれば自動で達成扱いにする判定キー（isGapAutoCleared 参照）。
+// 物理確認（施錠・手洗い設備・水質検査 等）は auto を付けず人手で確認する。
+// ※ 正式な認証取得時は、取得する認証の最新版（GLOBALG.A.P. IFA v6 等）の公式チェックリストと最終照合すること。
 const INITIAL_GAP_CHECKS = [
-  // ── 農薬管理 ──
-  { id:1,  category:'農薬管理', item:'農薬保管庫の施錠確認',                      is_cleared:false },
-  { id:2,  category:'農薬管理', item:'農薬散布記録の保管（5年間）',                is_cleared:false },
-  { id:3,  category:'農薬管理', item:'農薬ラベルの確認と遵守',                     is_cleared:false },
-  { id:4,  category:'農薬管理', item:'PPE（防護具）の使用記録',                    is_cleared:false },
-  { id:5,  category:'農薬管理', item:'農薬の購入・入庫記録の保管',                 is_cleared:false },
-  { id:6,  category:'農薬管理', item:'使用回数・使用量の基準値遵守確認',           is_cleared:false },
-  // ── 肥料管理 ──
-  { id:7,  category:'肥料管理', item:'肥料の購入・在庫記録の保管',                 is_cleared:false },
-  { id:8,  category:'肥料管理', item:'施肥記録（圃場・日付・量）の作成',           is_cleared:false },
-  { id:9,  category:'肥料管理', item:'堆肥の使用記録（原材料・施用日）',           is_cleared:false },
-  // ── 労働安全 ──
-  { id:10, category:'労働安全', item:'作業前安全教育の実施記録',                   is_cleared:false },
-  { id:11, category:'労働安全', item:'緊急時連絡先の掲示',                         is_cleared:false },
-  { id:12, category:'労働安全', item:'熱中症対策の実施記録',                       is_cleared:false },
-  { id:13, category:'労働安全', item:'外国人スタッフへの多言語安全教育記録',       is_cleared:false },
-  { id:14, category:'労働安全', item:'農薬散布時の防護具（マスク・手袋）着用確認', is_cleared:false },
-  // ── 衛生管理 ──
-  { id:15, category:'衛生管理', item:'手洗い設備の設置確認',                       is_cleared:false },
-  { id:16, category:'衛生管理', item:'トイレ設備の衛生点検記録',                   is_cleared:false },
-  { id:17, category:'衛生管理', item:'作業着の洗濯・管理記録',                     is_cleared:false },
-  { id:18, category:'衛生管理', item:'収穫後の洗浄・選別エリアの衛生管理',         is_cleared:false },
-  // ── 水質・土壌 ──
-  { id:19, category:'水質・土壌', item:'灌漑用水の水質検査記録（年1回以上）',     is_cleared:false },
-  { id:20, category:'水質・土壌', item:'土壌検査の実施記録',                       is_cleared:false },
-  // ── 機械管理 ──
-  { id:21, category:'機械管理', item:'トラクターの定期点検記録',                   is_cleared:false },
-  { id:22, category:'機械管理', item:'スプレーヤーの洗浄・点検記録',               is_cleared:false },
-  { id:23, category:'機械管理', item:'収穫機・搬送機器の清掃記録',                 is_cleared:false },
-  // ── 記録管理 ──
-  { id:24, category:'記録管理', item:'生産工程記録の作成・保管（作付〜出荷）',     is_cleared:false },
-  { id:25, category:'記録管理', item:'出荷記録のトレーサビリティ確保',             is_cleared:false },
-  { id:26, category:'記録管理', item:'収穫ロット番号の採番・記録',                 is_cleared:false },
-  { id:27, category:'記録管理', item:'出荷先別の規格・数量記録の保管',             is_cleared:false },
-  // ── リスク管理（TBD：ヒアリング後に精査） ──
-  { id:28, category:'リスク管理（TBD）', item:'異物混入リスク評価の実施',          is_cleared:false },
-  { id:29, category:'リスク管理（TBD）', item:'食品安全ハザード分析の記録',        is_cleared:false },
-  { id:30, category:'リスク管理（TBD）', item:'苦情・インシデント対応記録',        is_cleared:false },
+  // ── 記録・トレーサビリティ ──
+  { id:1,  category:'記録・トレーサビリティ', item:'圃場ごとの作業記録の作成・保管（5年間）',        auto:'records_exist',  is_cleared:false },
+  { id:2,  category:'記録・トレーサビリティ', item:'種苗→畝→農薬・肥料→収穫の追跡（トレーサビリティ）', auto:'traceability', is_cleared:false },
+  { id:3,  category:'記録・トレーサビリティ', item:'収穫ロット番号の採番・記録',                      auto:'harvest_record', is_cleared:false },
+  { id:4,  category:'記録・トレーサビリティ', item:'出荷先・出荷量の記録（引渡記録）',                auto:'shipment_record',is_cleared:false },
+  // ── 種苗 ──
+  { id:5,  category:'種苗',                  item:'種苗の入手先・品種・ロットの記録',                auto:'seed_lot',       is_cleared:false },
+  { id:6,  category:'種苗',                  item:'自家育苗・購入苗の管理記録',                                             is_cleared:false },
+  // ── 農薬（植物保護資材）──
+  { id:7,  category:'農薬（植物保護資材）',   item:'農薬使用記録（作物・日付・希釈・散布量）の作成',  auto:'spray_record',   is_cleared:false },
+  { id:8,  category:'農薬（植物保護資材）',   item:'登録農薬・適用作物・使用回数上限の整備',          auto:'pesticide_master',is_cleared:false },
+  { id:9,  category:'農薬（植物保護資材）',   item:'農薬の購入・入庫・在庫記録の保管',                auto:'pest_purchase',  is_cleared:false },
+  { id:10, category:'農薬（植物保護資材）',   item:'収穫前日数（PHI）の遵守確認',                                            is_cleared:false },
+  { id:11, category:'農薬（植物保護資材）',   item:'農薬保管庫の施錠・分別保管',                                            is_cleared:false },
+  { id:12, category:'農薬（植物保護資材）',   item:'PPE（防護具）の使用・保管',                                             is_cleared:false },
+  { id:13, category:'農薬（植物保護資材）',   item:'IPM（総合的病害虫管理）の実施記録',                                     is_cleared:false },
+  // ── 施肥・土壌管理 ──
+  { id:14, category:'施肥・土壌管理',         item:'施肥記録（圃場・日付・肥料・量）の作成',          auto:'fert_record',    is_cleared:false },
+  { id:15, category:'施肥・土壌管理',         item:'肥料・堆肥の購入・在庫記録の保管',                auto:'fert_purchase',  is_cleared:false },
+  { id:16, category:'施肥・土壌管理',         item:'土壌診断・土壌管理の記録',                                              is_cleared:false },
+  // ── 水管理 ──
+  { id:17, category:'水管理',                item:'灌漑用水の水源・水質リスク評価（年1回以上）',                            is_cleared:false },
+  { id:18, category:'水管理',                item:'水使用の記録',                                                          is_cleared:false },
+  // ── 収穫・調製・衛生 ──
+  { id:19, category:'収穫・調製・衛生',       item:'収穫・出荷記録の作成',                            auto:'harvest_record', is_cleared:false },
+  { id:20, category:'収穫・調製・衛生',       item:'収穫・調製時の衛生管理（手洗い・容器の洗浄）',                          is_cleared:false },
+  { id:21, category:'収穫・調製・衛生',       item:'作業者の衛生・健康管理',                                                is_cleared:false },
+  // ── 労働安全・福祉 ──
+  { id:22, category:'労働安全・福祉',         item:'作業者名簿・雇用記録の整備',                      auto:'worker_managed', is_cleared:false },
+  { id:23, category:'労働安全・福祉',         item:'外国人技能実習生の在留資格（ビザ）管理',          auto:'trainee_visa',   is_cleared:false },
+  { id:24, category:'労働安全・福祉',         item:'安全教育・多言語教育の実施記録',                                        is_cleared:false },
+  { id:25, category:'労働安全・福祉',         item:'緊急時連絡先の掲示・救急用具の常備',                                    is_cleared:false },
+  // ── 機械・器具の保守 ──
+  { id:26, category:'機械・器具の保守',       item:'機械・器具の点検・整備記録',                      auto:'machine_maint',  is_cleared:false },
+  { id:27, category:'機械・器具の保守',       item:'散布機・収穫機の洗浄記録（農薬残留防止）',        auto:'machine_maint',  is_cleared:false },
+  // ── 環境・廃棄物 ──
+  { id:28, category:'環境・廃棄物',           item:'廃棄物（農薬空容器・廃プラ）の分別・処理記録',                          is_cleared:false },
+  { id:29, category:'環境・廃棄物',           item:'エネルギー・資源使用の把握',                                            is_cleared:false },
 ]
+
+// GAP項目の自動達成判定: システムに該当記録があれば true（人手のチェック不要にする）。
+// ctx = { records, lotSprayRecords, pesticides, pesticidePurchases, topDressingRecords,
+//         fertilizerPurchases, harvestRecords, shipmentRecords, maintenanceRecords, staff, farmLots }
+function isGapAutoCleared(item, ctx) {
+  if (!item || !item.auto || !ctx) return false
+  const has = (a) => Array.isArray(a) && a.length > 0
+  const lots = () => Object.values(ctx.farmLots || {})
+  switch (item.auto) {
+    case 'records_exist':    return has(ctx.records)
+    case 'spray_record':     return has(ctx.lotSprayRecords) || (ctx.records || []).some(r => r.work_type === '農薬散布')
+    case 'pesticide_master': return has(ctx.pesticides)
+    case 'pest_purchase':    return has(ctx.pesticidePurchases)
+    case 'fert_record':      return has(ctx.topDressingRecords) || (ctx.records || []).some(r => r.work_type === '施肥')
+    case 'fert_purchase':    return has(ctx.fertilizerPurchases)
+    case 'harvest_record':   return has(ctx.harvestRecords)
+    case 'shipment_record':  return has(ctx.shipmentRecords)
+    case 'machine_maint':    return has(ctx.maintenanceRecords)
+    case 'worker_managed':   return has(ctx.staff)
+    case 'trainee_visa':     return (ctx.staff || []).some(s => s.role === 'trainee' && s.visa_expires_at)
+    case 'traceability':     return has(ctx.harvestRecords) && lots().some(a => (a || []).length > 0)
+    case 'seed_lot':         return lots().some(a => (a || []).some(l => l.seed_lot_no || l.variety))
+    default:                 return false
+  }
+}
 const INITIAL_RENTALS = []
 // ===== 今日のタスクモックデータ =====
 // 「今日 どの畑で 誰が 何をする」を一目で把握するためのデータ
