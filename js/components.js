@@ -9,30 +9,28 @@
 const NAV_SECTIONS_TOP = [
   { id:'dashboard', label:'総合ダッシュボード', icon:'home' },
 ]
+// 使用頻度順（毎日→季節ごと→稀）に整理。よく押す記録・確認を上に固める。
 const NAV_SECTIONS_DATA = [
   // 【日報入力】全圃場から選んで入力（複数圃場の一括記録に対応）。圃場詳細内の日報入力とは別の全体入口。
-  { id:'daily_entry',      label:'日報入力',            icon:'notebook'       },
-  { id:'crop_plan',        label:'作付計画 / 経営予測', icon:'calendar-event' },
-  { id:'export',           label:'GAP帳票出力',          icon:'file-export'    },
-  { id:'gap',              label:'GAPチェックリスト',    icon:'checklist'      },
-  { id:'record_list',      label:'日報管理',              icon:'list-details'   },
-  { id:'pesticide_master', label:'農薬マスタ管理',        icon:'flask'          },
-  // 【サンプル農園実データ統合 フェーズ3・Step3-1】肥料マスタ管理（農薬マスタのコピーで新規作成）
-  { id:'fertilizer_master',label:'肥料マスタ管理',        icon:'leaf'           },
-  // 【圃場まとめ】ロット別生産履歴（管理表シート相当の自動再構築）
-  { id:'field_summary',    label:'圃場まとめ',            icon:'table'          },
-  // 【収穫予測】積算温度モデルによる収穫予測日の自動算出
-  { id:'harvest_forecast', label:'収穫予測',              icon:'temperature'    },
-  // 【フェーズE・E-4 Step6】年度別の圃場サマリー（全圃場横断、圃場詳細ページの外）
-  { id:'field_performance',label:'圃場実績・評価',        icon:'chart-bar'      },
+  { id:'daily_entry',      label:'日報入力',            icon:'notebook'       },  // 毎日
+  { id:'record_list',      label:'日報管理',            icon:'list-details'   },  // 毎日（日報入力の隣）
+  { id:'field_summary',    label:'圃場まとめ',          icon:'table'          },  // 週次: ロット別生産履歴
+  { id:'harvest_forecast', label:'収穫予測',            icon:'temperature'    },  // 週次: 積算温度
+  { id:'field_performance',label:'圃場実績・評価',      icon:'chart-bar'      },  // 月次
+  { id:'crop_plan',        label:'作付計画 / 経営予測', icon:'calendar-event' },  // 季節ごと
+  { id:'export',           label:'GAP帳票出力',         icon:'file-export'    },  // 監査時
+  { id:'gap',              label:'GAPチェックリスト',   icon:'checklist'      },  // 監査時
 ]
+// マスタ・設定系をまとめる（見出しは「管理・設定」）。初期設定中心で頻度は低い。
 const NAV_SECTIONS_SYS = [
+  { id:'pesticide_master', label:'農薬マスタ管理',      icon:'flask'       },
+  { id:'fertilizer_master',label:'肥料マスタ管理',      icon:'leaf'        },
+  { id:'crop_categories',  label:'作物カテゴリ管理',    icon:'plant-2'     },
   { id:'staff',            label:'スタッフ管理',         icon:'users'       },
   { id:'trainee_diary',    label:'技能実習生 作業日誌', icon:'notebook'    },
+  { id:'manual',           label:'多言語マニュアル',    icon:'book-2'      },
   { id:'equipment',        label:'機器予約',             icon:'truck'       },
   { id:'simulator',        label:'収益シミュレーター',  icon:'currency-yen'},
-  { id:'manual',           label:'多言語マニュアル',    icon:'book-2'      },
-  { id:'crop_categories',  label:'作物カテゴリ管理',    icon:'plant-2'     },
   { id:'settings',         label:'設定',                icon:'settings'    },
 ]
 
@@ -299,7 +297,7 @@ function Sidebar({ current, onChange, fields, onAddField, onDeleteField, current
     React.createElement('div', { className:'nav-wrap', style:{ flexShrink:0, paddingTop:'14px' } },
       React.createElement('div', { className:'nav-section', style:{ marginTop:'4px' } }, '営農データ'),
       ...NAV_SECTIONS_DATA.map(n => React.createElement(NavBtn, { key:n.id, item:n })),
-      React.createElement('div', { className:'nav-section', style:{ marginTop:'8px' } }, 'システム'),
+      React.createElement('div', { className:'nav-section', style:{ marginTop:'8px' } }, '管理・設定'),
       ...NAV_SECTIONS_SYS.map(n => React.createElement(NavBtn, { key:n.id, item:n })),
     ),
 
