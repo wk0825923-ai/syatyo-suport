@@ -342,6 +342,22 @@ function SectionTitle({ icon, children, style }) {
 }
 
 // =====================================================
+// 折りたたみセクション（振り返り系など、既定で畳んで場所を取らせない用途）
+function CollapsibleSection({ title, hint, defaultOpen, children }) {
+  const [open, setOpen] = React.useState(!!defaultOpen)
+  return React.createElement('div', { style:{ margin:'6px 0 14px' } },
+    React.createElement('button', {
+      onClick: () => setOpen(o => !o),
+      style:{ display:'flex', alignItems:'center', gap:8, width:'100%', textAlign:'left', background:'#fff', border:'1px solid #E5E7EB', borderRadius:10, padding:'10px 14px', cursor:'pointer' },
+    },
+      React.createElement('i', { className:'ti ti-chevron-' + (open ? 'down' : 'right'), style:{ fontSize:'15px', color:'#0A6B52' } }),
+      React.createElement('span', { style:{ fontSize:13, fontWeight:700, color:'#374151' } }, title),
+      hint ? React.createElement('span', { style:{ fontSize:11, color:'#9CA3AF', marginLeft:4 } }, hint) : null,
+    ),
+    open ? React.createElement('div', { style:{ marginTop:10 } }, children) : null
+  )
+}
+
 // UX-11: 月次作業サマリーグラフ（改善版）
 // ・バーをクリックすると月別内訳パネルが展開
 // ・今月ミニサマリー（農薬散布・施肥・総作業）を先月比付きでグラフ下に統合
@@ -2390,8 +2406,9 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
       onDelete: onDeleteRecord ? id => { onDeleteRecord(id); setSelectedRecord(null) } : null,
     }),
 
-    // --- UX-11: 月次作業サマリーグラフ（今月ミニサマリー統合済み）---
-    React.createElement(MonthlySummaryChart, { records }),
+    // --- UX-11: 月次作業サマリー（振り返り用。既定で折りたたみ、必要な時だけ開く）---
+    React.createElement(CollapsibleSection, { title:'月次作業サマリー', hint:'（振り返り・直近6ヶ月）', defaultOpen:false },
+      React.createElement(MonthlySummaryChart, { records })),
 
     // --- 最下部: 来年の作付提案 + 圃場サマリー（全幅） ---
     React.createElement('div', { className:'page-grow' },
@@ -8036,6 +8053,7 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
   const [season, setSeason]       = React.useState('all')
   const [fieldFilter, setFieldFilter] = React.useState('all')
   const [expanded, setExpanded]   = React.useState(null)
+  const [selectedFid, setSelectedFid] = React.useState(null)  // グリッドでタップした圃場（明細表示対象）
 
   // 9月以降を新シーズン起点として "YYYY-YYYY" を導出（FieldPerformancePageと同一基準）
   const seasonOf = (dateStr) => {
@@ -8283,14 +8301,23 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
     )
   }
 
-  // ── 圃場グループごとのテーブル ──
-  const tables = groupIds.map(fid => {
+  // ── 圃場グループ集計（タイル用） ──
+  const groupStat = (fid) => {
+    const list = groups[fid] || []
+    const c = { growing:0, ready:0, harvested:0, fallow:0 }
+    list.forEach(e => { c[e.lot.status] = (c[e.lot.status] || 0) + 1 })
+    return { list, cases: list.reduce((a,e)=>a+e.totalCases,0), cost: list.reduce((a,e)=>a+e.totalCost,0), cnt:c }
+  }
+
+  // ── 選択された圃場の明細テーブル（タップで表示） ──
+  const renderFieldTable = (fid) => {
     const f = fields.find(x => x.id === fid)
     const list = (groups[fid] || []).slice().sort((a, b) => String(a.lot.transplant_date || '').localeCompare(String(b.lot.transplant_date || '')))
     const grpCases = list.reduce((a, e) => a + e.totalCases, 0)
     const grpCost  = list.reduce((a, e) => a + e.totalCost, 0)
-    return React.createElement('div', { key:fid, style:{ ...card, padding:0, marginBottom:16, overflow:'hidden' } },
+    return React.createElement('div', { key:'detail_'+fid, style:{ ...card, padding:0, marginTop:16, marginBottom:16, overflow:'hidden', border:'2px solid #0A6B52' } },
       React.createElement('div', { style:{ padding:'12px 18px', background:'#F0FDF4', borderBottom:'1px solid #E5E7EB', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' } },
+        React.createElement('button', { onClick:()=>setSelectedFid(null), style:{ border:'none', background:'#fff', borderRadius:6, padding:'4px 10px', fontSize:12, fontWeight:700, color:'#6B7280', cursor:'pointer' } }, '← 一覧'),
         React.createElement('span', { style:{ fontSize:15, fontWeight:800, color:'#0A6B52' } }, fieldLabel(f)),
         f && f.crop ? React.createElement('span', { style:{ fontSize:12, color:'#fff', background:(f.color||'#6B7280'), borderRadius:6, padding:'2px 8px', fontWeight:700 } }, f.crop) : null,
         React.createElement('span', { style:{ fontSize:12, color:'#9CA3AF' } }, list.length + ' ロット'),
@@ -8341,7 +8368,41 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
         ),
       ),
     )
-  })
+  }
+
+  // ── 圃場タイルのグリッド（タップでその圃場の明細を開く） ──
+  const statusDot = (color, n, label) => n > 0 ? React.createElement('span', { key:label, style:{ display:'inline-flex', alignItems:'center', gap:3, fontSize:11, color:'#6B7280' } },
+    React.createElement('span', { style:{ width:8, height:8, borderRadius:'50%', background:color } }), n) : null
+  const fieldGrid = React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(230px, 1fr))', gap:12 } },
+    ...groupIds.map(fid => {
+      const f = fields.find(x => x.id === fid)
+      const st = groupStat(fid)
+      const sel = selectedFid === fid
+      return React.createElement('button', {
+        key:fid,
+        onClick: () => setSelectedFid(sel ? null : fid),
+        style:{ textAlign:'left', cursor:'pointer', background:'#fff', border:'1px solid '+(sel?'#0A6B52':'#E5E7EB'), boxShadow: sel?'0 0 0 3px rgba(10,107,82,.15)':'0 1px 3px rgba(0,0,0,.04)', borderRadius:12, padding:'14px 16px', display:'flex', flexDirection:'column', gap:8, transition:'all .12s' },
+      },
+        React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8 } },
+          React.createElement('span', { style:{ width:10, height:10, borderRadius:'50%', background:(f&&f.color)||'#6B7280', flexShrink:0 } }),
+          React.createElement('span', { style:{ fontSize:14, fontWeight:800, color:'#111827' } }, f ? f.name : '—'),
+          f && f.crop ? React.createElement('span', { style:{ marginLeft:'auto', fontSize:11, color:'#fff', background:(f.color||'#6B7280'), borderRadius:5, padding:'1px 7px', fontWeight:700 } }, f.crop) : null,
+        ),
+        React.createElement('div', { style:{ display:'flex', alignItems:'baseline', gap:6 } },
+          React.createElement('span', { style:{ fontSize:22, fontWeight:800, color:'#0A6B52', lineHeight:1 } }, st.cases.toLocaleString()),
+          React.createElement('span', { style:{ fontSize:11, color:'#6B7280' } }, 'ケース収穫'),
+          st.cost > 0 ? React.createElement('span', { style:{ marginLeft:'auto', fontSize:12, color:'#B45309', fontWeight:700 } }, '¥' + Math.round(st.cost).toLocaleString()) : null,
+        ),
+        React.createElement('div', { style:{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' } },
+          React.createElement('span', { style:{ fontSize:11, color:'#9CA3AF' } }, st.list.length + ' ロット'),
+          statusDot('#0D9972', st.cnt.growing, 'g'),
+          statusDot('#B45309', st.cnt.ready, 'r'),
+          statusDot('#1D4ED8', st.cnt.harvested, 'h'),
+          React.createElement('span', { style:{ marginLeft:'auto', fontSize:11, fontWeight:700, color:sel?'#0A6B52':'#9CA3AF' } }, sel ? '▼ 表示中' : 'タップで明細'),
+        ),
+      )
+    })
+  )
 
   const noteStyle = { fontSize:12, color:'#B45309', background:'#FFFBEB', border:'1px solid #FDE68A', borderRadius:8, padding:'10px 14px', marginTop:8 }
   const notes = []
@@ -8351,14 +8412,15 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
     '⚠️ 資材原価は「使用量×単価」の参考値です。農薬は購入実績（円/L）、肥料はマスタ単価（円/kg）を使用し、単価未確定の品目はコストに含めていません（金額末尾の「＋」は未確定品目を含むロット）。'))
   const footNote = notes.length ? React.createElement('div', null, ...notes) : null
 
+  const validSelected = selectedFid != null && groupIds.includes(selectedFid)
   return React.createElement('div', { style:wrap },
     headerEl,
     filterBar,
     summaryRow,
-    ...tables,
     visible.length === 0
       ? React.createElement('div', { style:{ ...card, textAlign:'center', color:'#9CA3AF', fontSize:13, padding:'32px' } }, '該当するロットがありません（フィルタ条件を変更してください）')
-      : null,
+      : fieldGrid,
+    validSelected ? renderFieldTable(selectedFid) : null,
     footNote,
   )
 }
