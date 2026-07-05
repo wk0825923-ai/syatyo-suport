@@ -31,6 +31,65 @@
   // ── 【フェーズE・E-4 Step4】ロット単位の農薬散布記録 state ──
   const [lotSprayRecords, setLotSprayRecords] = useFPS('farm_lot_spray_records', INITIAL_LOT_SPRAY_RECORDS)
 
+  // ── 【畝ロット管理】圃場ごとの畝ロット（旧・静的LOTSの動的化） ──
+  // { [field_id]: [lot, ...] } 形式。定植日報の保存で自動生成されるほか、
+  // 圃場ダッシュボードから手動で追加・編集・削除できる。
+  const [farmLots, setFarmLots] = useFPS('farm_lots', {})
+
+  // ロット追加共通処理: 畝マップ表示のため、圃場のrow_count（畝の総本数）が
+  // ロットの最大畝番号より小さい場合は自動で広げる
+  const extendRowCount = (fieldId, rowRange) => {
+    const rows = parseRowRange(rowRange)
+    if (rows.size === 0) return
+    const maxRow = Math.max(...rows)
+    setFields(prev => prev.map(f =>
+      f.id === Number(fieldId) && (!f.row_count || f.row_count < maxRow)
+        ? { ...f, row_count: maxRow }
+        : f
+    ))
+  }
+  const onAddLot = (fieldId, lot) => {
+    const entry = { ...lot, id: Date.now() }
+    setFarmLots(prev => ({ ...prev, [fieldId]: [...(prev[fieldId] || []), entry] }))
+    extendRowCount(fieldId, lot.row_range)
+  }
+  const onUpdateLot = (fieldId, lot) => {
+    setFarmLots(prev => ({ ...prev, [fieldId]: (prev[fieldId] || []).map(l => l.id === lot.id ? lot : l) }))
+    extendRowCount(fieldId, lot.row_range)
+  }
+  const onDeleteLot = (fieldId, lotId) => {
+    setFarmLots(prev => ({ ...prev, [fieldId]: (prev[fieldId] || []).filter(l => l.id !== lotId) }))
+  }
+
+  // 定植日報の保存 → 畝ロットを自動生成する。
+  // 日報には「作業畝数」しか無く畝番号の範囲は分からないため、
+  // 既存ロットの最終畝番号の続きに仮置きする（圃場ダッシュボードから編集可能）。
+  const autoCreateLotFromTransplant = (r) => {
+    if (r.work_type !== '定植') return
+    const rows = Number(r.rows_worked) || 0
+    if (rows <= 0) return
+    const existing = farmLots[r.field_id] || []
+    const usedMax = existing.reduce((m, l) => {
+      const set = parseRowRange(l.row_range)
+      return set.size > 0 ? Math.max(m, ...set) : m
+    }, 0)
+    const start = usedMax + 1
+    const row_range = rows === 1 ? String(start) : start + '-' + (start + rows - 1)
+    const seedlingDays = (r.seed_date && r.date)
+      ? Math.round((new Date(r.date) - new Date(r.seed_date)) / 86400000)
+      : null
+    onAddLot(r.field_id, {
+      row_range,
+      variety:              r.variety || '（品種未入力）',
+      seed_date:            r.seed_date || '',
+      transplant_date:      r.date,
+      transplant_count:     Number(r.tray_count) || null,
+      seedling_period_days: seedlingDays,
+      status:               'growing',
+      source_record_id:     r.id,  // 生成元の定植日報
+    })
+  }
+
   // ── 【フェーズE・E-4 Step5】収穫記録（出荷先別ケース数）state ──
   const [harvestRecords, setHarvestRecords] = useFPS('farm_harvest_records', INITIAL_HARVEST_RECORDS)
 
@@ -64,12 +123,13 @@
     ))
   }
 
-  // 記録保存時: 農薬散布なら在庫を減算
+  // 記録保存時: 農薬散布なら在庫を減算 / 定植なら畝ロットを自動生成
   const onSaveRecordWithStock = (r) => {
     setRecords(p => [...p, r])
     if (r.work_type === '農薬散布' && r.pesticide_id && r.amount) {
       adjustStock(r.pesticide_id, Number(r.amount))
     }
+    autoCreateLotFromTransplant(r)
   }
 
   // 記録更新時: 差分計算で在庫を調整
@@ -297,7 +357,7 @@
   const addTodayTask    = task => setTodayTasks(p => [...p, task])
 
   const pageMap = {
-    dashboard:         () => React.createElement(Dashboard,   { fields, records, staff, gap, todayTasks, onToggleTodayTask:toggleTodayTask, onAddTodayTask:addTodayTask, cropPlans, pesticides, pesticideStock, fertilizers, fertilizerStock, onNavigate: p => setPage(p), onSaveRecord: onSaveRecordWithStock, onUpdateRecord: onUpdateRecordWithStock, onDeleteRecord: onDeleteRecordWithStock }),
+    dashboard:         () => React.createElement(Dashboard,   { fields, records, staff, gap, todayTasks, onToggleTodayTask:toggleTodayTask, onAddTodayTask:addTodayTask, cropPlans, pesticides, pesticideStock, fertilizers, fertilizerStock, lotSprayRecords, onNavigate: p => setPage(p), onSaveRecord: onSaveRecordWithStock, onUpdateRecord: onUpdateRecordWithStock, onDeleteRecord: onDeleteRecordWithStock }),
     record_list:       () => React.createElement(RecordTablePage, { records, fields, pesticides, onUpdate: onUpdateRecordWithStock, onDelete: onDeleteRecordWithStock, cropCycles, onUpdateRecordCycle }),
     export:            () => React.createElement(GapExport,  { gap, onToggle:id=>setGap(p=>p.map(c=>c.id===id?{...c,is_cleared:!c.is_cleared}:c)), records, fields, pesticides }),
     field_map:         () => React.createElement(FieldMapPage,   { fields, onAdd:f=>setFields(p=>[...p,f]), onDelete:id=>setFields(p=>p.filter(f=>f.id!==id)), cropCycles, onNavigate:setPage, cropCategories }),
@@ -364,6 +424,9 @@
     mainContent = field
       ? React.createElement(FieldDetailPage, {
           field, fields, records, pesticides,
+          // 【畝ロット管理】動的ロット + CRUD
+          lots: farmLots[field.id] || [],
+          onAddLot, onUpdateLot, onDeleteLot,
           onSaveRecord: onSaveRecordWithStock,
           onUpdateRecord: onUpdateRecordWithStock,
           onDeleteRecord: onDeleteRecordWithStock,

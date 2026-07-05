@@ -36,14 +36,21 @@ function calcDaysLeft(dateStr) {
 // 重複していたビザ残日数計算・農薬使用回数チェックを一本化
 // =====================================================
 // ② 農薬使用回数チェック（PesticideInput / DailyRecord で重複していたロジック）
-function countPesticideUse(records, fieldId, pesticideId) {
-  return records.filter(
+// lotSprayRecords（農薬散布タブのロット単位記録）も同じ圃場×農薬の使用回数として合算する。
+// 日報とロット記録で同じ散布を二重登録した場合は多めにカウントされる（安全側に倒す）。
+// ※ 使用回数の上限は本来「作付け1回あたり」「有効成分ごと」で決まるため、これは参考値。
+function countPesticideUse(records, fieldId, pesticideId, lotSprayRecords = []) {
+  const dailyCount = records.filter(
     r => r.field_id === Number(fieldId) && r.pesticide_id === pesticideId
   ).length
+  const lotCount = lotSprayRecords.filter(
+    r => r.field_id === Number(fieldId) && (r.pesticides || []).some(p => p.pesticide_id === pesticideId)
+  ).length
+  return dailyCount + lotCount
 }
-function isPesticideOverLimit(records, fieldId, pesticide) {
+function isPesticideOverLimit(records, fieldId, pesticide, lotSprayRecords = []) {
   if (!pesticide) return false
-  return countPesticideUse(records, fieldId, pesticide.id) >= pesticide.max_times
+  return countPesticideUse(records, fieldId, pesticide.id, lotSprayRecords) >= pesticide.max_times
 }
 
 // ②-2 収穫前日数アラート（ダッシュボード用）

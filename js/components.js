@@ -2129,7 +2129,7 @@ function TodayTaskList({ tasks, fields, staff, onToggle, onAdd, onOpenRecord }) 
 }
 
 // ダッシュボード本体
-function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask, onAddTodayTask, cropPlans, pesticides, pesticideStock, fertilizers, fertilizerStock, onNavigate, onSaveRecord, onUpdateRecord, onDeleteRecord }) {
+function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask, onAddTodayTask, cropPlans, pesticides, pesticideStock, fertilizers, fertilizerStock, lotSprayRecords, onNavigate, onSaveRecord, onUpdateRecord, onDeleteRecord }) {
   // --- 集計 ---
   const gapPct     = gap.length > 0 ? Math.round(gap.filter(c => c.is_cleared).length / gap.length * 100) : 0
   const harvestRisks = calcHarvestRisk(records, cropPlans || [], pesticides || [], fields)
@@ -2295,7 +2295,12 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
       React.createElement(SectionTitle, { icon:'alert-triangle' }, '収穫前日数アラート'),
       harvestRisks.length === 0
         ? React.createElement(HarvestRiskClearBadge)
-        : harvestRisks.map(r => React.createElement(HarvestRiskAlertCard, { key:r.id, risk:r }))
+        : harvestRisks.map(r => React.createElement(HarvestRiskAlertCard, { key:r.id, risk:r })),
+      // 防除の使用基準は作物×農薬の組み合わせで法的に決まるため、参考値であることを常に明示
+      React.createElement('div', { style:{ fontSize:'11px', color:'#94A3B8', marginTop:'6px', marginBottom:'12px', lineHeight:1.7 } },
+        '※ 農薬マスタの「収穫前日数」と作付計画の収穫予定月から算出した参考情報です。',
+        '実際の使用可否は必ず農薬ラベル（作物別の使用基準）で確認してください。'
+      )
     ),
 
     // --- アラートカード（ビザ期限）---【削除済み】ビザ管理機能はスコープ外
@@ -2342,6 +2347,7 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
           fields: fields.filter(f => f.id === activeTask.field_id),
           pesticides: pesticides || [],
           records: records || [],
+          lotSprayRecords: lotSprayRecords || [],
           inModal: true,
           onSave: r => {
             if (onSaveRecord) onSaveRecord({ ...r, field_id: activeTask.field_id })
@@ -2380,7 +2386,7 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
 // 同圃場・同農薬の年間使用回数をrecordsから集計して上限チェック
 // 超過時は赤バナー + 保存ブロック
 // =====================================================
-function PesticideInput({ pesticides, records, fieldId, pesticideId, crop, fieldArea, onUpdate }) {
+function PesticideInput({ pesticides, records, fieldId, pesticideId, crop, fieldArea, onUpdate, lotSprayRecords }) {
   // 【フェーズ2】作物に応じた使用可能農薬リスト（CROP_PESTICIDE_MAP）
   const cropMap = crop ? CROP_PESTICIDE_MAP[crop] : null
   const availablePesticides = cropMap
@@ -2397,8 +2403,9 @@ function PesticideInput({ pesticides, records, fieldId, pesticideId, crop, field
   // 作物マップに登録された標準希釈倍率（自動セット）。なければ農薬自体の標準倍率を使用
   const mapEntry   = cropMap && selected ? cropMap.find(c => c.pesticide_id === selected.id) : null
   const dilution   = mapEntry ? mapEntry.dilution : (selected ? selected.dilution : 1000)
-  const usedTimes  = countPesticideUse(records, fieldId, selectedId)
-  const isOver     = isPesticideOverLimit(records, fieldId, selected)
+  // 使用回数は日報の農薬散布 + 農薬散布タブ（ロット単位）の記録を合算した参考値
+  const usedTimes  = countPesticideUse(records, fieldId, selectedId, lotSprayRecords || [])
+  const isOver     = isPesticideOverLimit(records, fieldId, selected, lotSprayRecords || [])
   const remaining  = selected ? selected.max_times - usedTimes : null
 
   // 【新規】計算ロジック
@@ -2993,13 +3000,13 @@ function RecordStep2({ form, up, onPrev, onNext }) {
 }
 
 // ── ステップ3: 農薬/施肥 詳細入力 ──────────────────
-function RecordStep3({ form, up, pesticides, records, isOver, selField, handlePesticideUpdate, onPrev, onNext }) {
+function RecordStep3({ form, up, pesticides, records, lotSprayRecords, isOver, selField, handlePesticideUpdate, onPrev, onNext }) {
   return React.createElement('div', null,
     React.createElement('div', { className:'section-title' }, form.work_type === '農薬散布' ? '🧴 農薬情報' : '📊 作業量を入力'),
     // 【フェーズ2】農薬散布時: 圃場の作物（selField.crop）と面積（selField.area_are）を渡し、農薬・希釈倍率を自動セット。
     // スタッフが入力するのは「使用した農薬名（選択）」と「散布液量」の1項目のみ
     form.work_type === '農薬散布' && React.createElement(PesticideInput, {
-      pesticides, records,
+      pesticides, records, lotSprayRecords,
       fieldId:     form.field_id,
       pesticideId: form.pesticide_id,
       crop:        selField ? selField.crop : null,
@@ -3902,7 +3909,7 @@ function RecordTable({ records, fields, pesticides, onUpdate, onDelete, cropCycl
 }
 
 // ── RecordForm: フォーム専用ページ（旧 DailyRecord hideList:true）──
-function RecordForm({ fields, pesticides, records, onSave, inModal }) {
+function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayRecords }) {
   const STEPS = ['日付・圃場', '作業内容', '農薬/施肥', '確認・保存']
   const [step, setStep]         = React.useState(1)
   const [dilution, setDilution] = React.useState(1000)
@@ -3925,7 +3932,7 @@ function RecordForm({ fields, pesticides, records, onSave, inModal }) {
   const updateField = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   const selP    = pesticides.find(p => p.id === Number(form.pesticide_id))
-  const isOver  = isPesticideOverLimit(records, form.field_id, selP)
+  const isOver  = isPesticideOverLimit(records, form.field_id, selP, lotSprayRecords || [])
   const selField = fields.find(f => f.id === Number(form.field_id))
 
   // C04-1: onUpdate を useCallback でメモ化
@@ -3967,7 +3974,7 @@ function RecordForm({ fields, pesticides, records, onSave, inModal }) {
   const stepComponents = React.useMemo(() => [null,
     () => React.createElement(RecordStep1, { form, fields, up:updateField, onNext:()=>setStep(2), isFieldPreset }),
     () => React.createElement(RecordStep2, { form, up:updateField, onPrev:()=>setStep(1), onNext:()=>setStep(3) }),
-    () => React.createElement(RecordStep3, { form, up:updateField, pesticides, records, isOver, selField, handlePesticideUpdate, onPrev:()=>setStep(2), onNext:()=>setStep(4) }),
+    () => React.createElement(RecordStep3, { form, up:updateField, pesticides, records, lotSprayRecords, isOver, selField, handlePesticideUpdate, onPrev:()=>setStep(2), onNext:()=>setStep(4) }),
     () => React.createElement(RecordStep4, { form, dilution, selField, selP, isOver, onPrev:()=>setStep(3), onSave:handleSave, showContinueButton, onContinue:handleContinueInput }),
   ], [step, form, fields, pesticides, records, isOver, dilution, selField, selP, handlePesticideUpdate, showContinueButton])
 
@@ -4646,7 +4653,153 @@ function RiceStageTimeline({ field }) {
 // FIELD_SUB_ITEMS の先頭タブ（dashboard）として表示される。
 // 【Step3追加】畝マップのクリックでロット詳細をハイライト表示する
 // ─────────────────────────────────────────────────────
-function FieldDashboardSection({ field, fieldRecords, fieldRows, pesticides, lotSprayRecords }) {
+// ─────────────────────────────────────────────────────
+// 【畝ロット管理】LotFormModal — 畝ロットの手動登録・編集フォーム
+// 定植日報からの自動生成を補完する自由度の高い入力手段。
+// 畝範囲は「1-7」「8-15,20」のような表記で入力（散布・収穫記録と同じ形式）。
+// ─────────────────────────────────────────────────────
+function LotFormModal({ field, lot, existingLots, onSave, onClose }) {
+  const isEdit = !!lot
+  const [form, setForm] = React.useState({
+    row_range:        lot?.row_range        || '',
+    variety:          lot?.variety          || '',
+    seed_date:        lot?.seed_date        || '',
+    transplant_date:  lot?.transplant_date  || '',
+    harvest_start:    lot?.harvest_start    || '',
+    harvest_end:      lot?.harvest_end      || '',
+    seedling_type:    lot?.seedling_type    || '',
+    transplant_count: lot?.transplant_count || '',
+    status:           lot?.status           || 'growing',
+  })
+  const uf = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const rowSet = parseRowRange(form.row_range)
+  // 他ロットとの畝番号重複チェック（編集中の自分自身は除外）
+  const overlapping = (existingLots || []).some(l => {
+    if (isEdit && l.id === lot.id) return false
+    const other = parseRowRange(l.row_range)
+    for (const n of rowSet) { if (other.has(n)) return true }
+    return false
+  })
+  const valid = rowSet.size > 0 && form.variety.trim() !== ''
+
+  const handleSave = () => {
+    if (!valid) return
+    const seedlingDays = (form.seed_date && form.transplant_date)
+      ? Math.round((new Date(form.transplant_date) - new Date(form.seed_date)) / 86400000)
+      : (lot?.seedling_period_days ?? null)
+    onSave({
+      ...(lot || {}),
+      ...form,
+      variety: form.variety.trim(),
+      row_range: form.row_range.trim(),
+      transplant_count: Number(form.transplant_count) || null,
+      seedling_period_days: seedlingDays,
+    })
+    onClose()
+  }
+
+  const inputStyle = {
+    background:'#FFFFFF', border:'1.5px solid #D8E4D8', borderRadius:'7px',
+    padding:'7px 10px', fontSize:'13px', color:'#111827', outline:'none', width:'100%', boxSizing:'border-box'
+  }
+  const labelStyle = {
+    fontSize:'10px', fontWeight:700, color:'#6B7280', letterSpacing:'.05em',
+    textTransform:'uppercase', marginBottom:'4px', display:'block'
+  }
+  const fieldBox = (label, key, type = 'text', placeholder = '') =>
+    React.createElement('div', null,
+      React.createElement('label', { style: labelStyle }, label),
+      React.createElement('input', {
+        type, placeholder, value: form[key],
+        onChange: e => uf(key, e.target.value), style: inputStyle,
+      })
+    )
+
+  return React.createElement('div', {
+    style:{ position:'fixed', inset:0, background:'rgba(17,24,39,.45)', zIndex:2000, display:'flex', alignItems:'center', justifyContent:'center' },
+    onClick: onClose
+  },
+    React.createElement('div', {
+      style:{ background:'#FFFFFF', borderRadius:'12px', padding:'24px', width:'520px', maxWidth:'95vw', maxHeight:'90vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(0,0,0,.2)', animation:'fadeInDown .18s ease' },
+      onClick: e => e.stopPropagation()
+    },
+      React.createElement('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'16px' } },
+        React.createElement('div', { style:{ fontSize:'15px', fontWeight:700, color:'#111827' } },
+          (isEdit ? '畝ロットを編集' : '畝ロットを追加') + ' — ' + field.name),
+        React.createElement('button', {
+          onClick: onClose,
+          style:{ background:'none', border:'none', cursor:'pointer', fontSize:'20px', color:'#9CA3AF', lineHeight:1, padding:'4px' }
+        }, '✕')
+      ),
+
+      // 畝範囲 + 品種
+      React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'12px' } },
+        React.createElement('div', null,
+          React.createElement('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'4px' } },
+            React.createElement('label', { style:{ ...labelStyle, marginBottom:0 } }, '畝範囲 *'),
+            rowSet.size > 0 && React.createElement('span', {
+              style:{ fontSize:'10px', fontWeight:700, color:'#0A6B52', background:'#ECFDF5', border:'1px solid #6EE7B7', borderRadius:'10px', padding:'1px 7px' }
+            }, rowSet.size + '畝')
+          ),
+          React.createElement('input', {
+            type:'text', placeholder:'例: 1-7 / 8-15,20', value:form.row_range,
+            onChange:e=>uf('row_range', e.target.value), style:inputStyle,
+          })
+        ),
+        fieldBox('品種 *', 'variety', 'text', '例: ブルラッシュ')
+      ),
+      overlapping && React.createElement('div', {
+        style:{ fontSize:'11px', color:'#B45309', background:'#FFFBEB', border:'1px solid #FDE68A', borderRadius:'6px', padding:'6px 10px', marginBottom:'12px' }
+      }, '⚠️ 他のロットと畝番号が重なっています（登録は可能です。畝の使い回しの場合はそのままでOK）'),
+
+      // 日付類
+      React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'12px' } },
+        fieldBox('播種日（は種日）', 'seed_date', 'date'),
+        fieldBox('定植日', 'transplant_date', 'date'),
+        fieldBox('収穫予定 開始', 'harvest_start', 'date'),
+        fieldBox('収穫予定 終了', 'harvest_end', 'date')
+      ),
+      React.createElement('div', { style:{ fontSize:'11px', color:'#94A3B8', marginBottom:'12px' } },
+        '※ 収穫予定開始日を入れると、この畝ロットが防除アラートの判定対象になります'),
+
+      // 苗種類・定植枚数・状態
+      React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'12px', marginBottom:'18px' } },
+        fieldBox('苗種類', 'seedling_type', 'text', '例: セル200'),
+        fieldBox('定植枚数', 'transplant_count', 'number', '例: 80'),
+        React.createElement('div', null,
+          React.createElement('label', { style: labelStyle }, '状態'),
+          React.createElement('select', {
+            value: form.status, onChange: e => uf('status', e.target.value),
+            style:{ ...inputStyle, height:'34px' }
+          },
+            Object.entries(ROW_STATUS_CONFIG).map(([key, cfg]) =>
+              React.createElement('option', { key, value:key }, cfg.label)
+            )
+          )
+        )
+      ),
+
+      // ボタン
+      React.createElement('div', { style:{ display:'flex', gap:'10px', justifyContent:'flex-end' } },
+        React.createElement('button', {
+          onClick: onClose,
+          style:{ padding:'9px 18px', borderRadius:'8px', border:'1.5px solid #D8E4D8', background:'#fff', color:'#374151', fontSize:'13px', fontWeight:600, cursor:'pointer' }
+        }, 'キャンセル'),
+        React.createElement('button', {
+          onClick: handleSave, disabled: !valid,
+          style:{
+            padding:'9px 20px', borderRadius:'8px', border:'none',
+            cursor: valid ? 'pointer' : 'not-allowed',
+            background: valid ? '#0A6B52' : '#D1D5DB', color:'#fff', fontSize:'13px', fontWeight:700,
+          }
+        }, isEdit ? '保存する' : '登録する')
+      )
+    )
+  )
+}
+
+function FieldDashboardSection({ field, fieldRecords, fieldRows, pesticides, lotSprayRecords, onAddLot, onUpdateLot, onDeleteLot }) {
   const lots          = fieldRows || []
   const activeLots     = lots.filter(l => l.status === 'growing' || l.status === 'ready')
   const harvestedLots  = lots.filter(l => l.status === 'harvested')
@@ -4657,6 +4810,10 @@ function FieldDashboardSection({ field, fieldRecords, fieldRows, pesticides, lot
   // 【Step3】畝マップでクリックされたロットのID（nullで未選択）
   const [highlightedLotId, setHighlightedLotId] = React.useState(null)
   const highlightedLot = highlightedLotId ? lots.find(l => l.id === highlightedLotId) : null
+
+  // 【畝ロット管理】追加・編集モーダル / 削除確認
+  const [lotModal, setLotModal] = React.useState(null)             // null | { lot: null(新規) | lotObj(編集) }
+  const [lotDeleteTarget, setLotDeleteTarget] = React.useState(null)
 
   // 直近の収穫予定: 進行中ロットを収穫開始日が近い順に並べる
   const upcomingHarvests = [...activeLots]
@@ -4800,12 +4957,76 @@ function FieldDashboardSection({ field, fieldRecords, fieldRows, pesticides, lot
         )
       : null,
 
+    // --- 【畝ロット管理】ロット一覧 + 追加・編集・削除 ---
+    React.createElement('div', { style:{ marginBottom:'24px' } },
+      React.createElement('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px' } },
+        React.createElement(SectionTitle, { icon:'rows', style:{ marginBottom:0 } }, '畝ロット管理'),
+        onAddLot && React.createElement('button', {
+          className:'btn btn-primary',
+          style:{ display:'flex', alignItems:'center', gap:'6px' },
+          onClick: () => setLotModal({ lot: null })
+        },
+          React.createElement('i', { className:'ti ti-plus', style:{ fontSize:'14px' } }),
+          '畝ロットを追加'
+        )
+      ),
+      lots.length === 0
+        ? React.createElement('div', { className:'card', style:{ padding:'24px', textAlign:'center', color:'#94A3B8', fontSize:'13px', lineHeight:1.8 } },
+            '畝ロットはまだ登録されていません。', React.createElement('br', null),
+            '定植日報（作業畝数入り）を保存すると自動で作成されます。手動でも追加できます。'
+          )
+        : React.createElement('div', { className:'card', style:{ padding:0, overflowX:'auto' } },
+            React.createElement('table', { className:'table', style:{ width:'100%', fontSize:'13px' } },
+              React.createElement('thead', null,
+                React.createElement('tr', null,
+                  ['畝範囲', '品種', '播種日', '定植日', '収穫予定', '状態', ''].map((h, i) =>
+                    React.createElement('th', { key:i, style:{ whiteSpace:'nowrap' } }, h))
+                )
+              ),
+              React.createElement('tbody', null,
+                lots.map(lot => {
+                  const cfg = ROW_STATUS_CONFIG[lot.status] || ROW_STATUS_CONFIG.growing
+                  return React.createElement('tr', { key: lot.id },
+                    React.createElement('td', { style:{ fontWeight:700, whiteSpace:'nowrap' } }, lot.row_range + '畝'),
+                    React.createElement('td', null, lot.variety),
+                    React.createElement('td', { style:{ whiteSpace:'nowrap' } }, lot.seed_date || '—'),
+                    React.createElement('td', { style:{ whiteSpace:'nowrap' } }, lot.transplant_date || '—'),
+                    React.createElement('td', { style:{ whiteSpace:'nowrap' } },
+                      lot.harvest_start ? lot.harvest_start + (lot.harvest_end ? '〜' + lot.harvest_end : '〜') : '—'),
+                    React.createElement('td', null,
+                      React.createElement('span', {
+                        style:{ fontSize:'11px', fontWeight:600, color:cfg.color, background:cfg.bg, border:'1px solid '+cfg.color+'40', borderRadius:'6px', padding:'2px 8px', whiteSpace:'nowrap' }
+                      }, cfg.label)
+                    ),
+                    React.createElement('td', { style:{ whiteSpace:'nowrap', textAlign:'right' } },
+                      onUpdateLot && React.createElement('button', {
+                        onClick: () => setLotModal({ lot }), title:'編集',
+                        style:{ background:'none', border:'none', color:'#64748B', cursor:'pointer', fontSize:'15px', padding:'4px' }
+                      }, React.createElement('i', { className:'ti ti-pencil' })),
+                      onDeleteLot && React.createElement('button', {
+                        onClick: () => setLotDeleteTarget(lot), title:'削除',
+                        style:{ background:'none', border:'none', color:'#CBD5E1', cursor:'pointer', fontSize:'15px', padding:'4px' }
+                      }, React.createElement('i', { className:'ti ti-trash' }))
+                    )
+                  )
+                })
+              )
+            )
+          )
+    ),
+
     // --- 要防除アラート ---
     React.createElement('div', { style:{ marginBottom:'20px' } },
       React.createElement(SectionTitle, { icon:'alert-triangle' }, '要防除アラート'),
       lotRisks.length === 0
         ? React.createElement(LotRiskClearBadge)
-        : lotRisks.map(r => React.createElement(LotRiskAlertCard, { key:r.id, risk:r }))
+        : lotRisks.map(r => React.createElement(LotRiskAlertCard, { key:r.id, risk:r })),
+      // 防除は法的な使用基準（作物別の収穫前日数・使用回数・希釈倍率）に関わるため、
+      // 本アラートが「参考値」であることを常に明示する
+      React.createElement('div', { style:{ fontSize:'11px', color:'#94A3B8', marginTop:'8px', lineHeight:1.7 } },
+        '※ 農薬マスタに登録した「収穫前日数」と畝ロットの「収穫予定開始日」から算出した参考情報です。',
+        '収穫前日数は作物ごとに異なるため、実際の使用可否は必ず農薬ラベルの使用基準で確認してください。'
+      )
     ),
 
     // --- 直近の収穫予定 ---
@@ -4844,7 +5065,28 @@ function FieldDashboardSection({ field, fieldRecords, fieldRows, pesticides, lot
           ? React.createElement('div', { style:{ textAlign:'center', color:'#94A3B8', fontSize:'13px' } }, 'この圃場の記録はまだありません')
           : recentRecords.map(r => React.createElement(RecordLogRow, { key:r.id, record:r, fields:[field] }))
       )
-    )
+    ),
+
+    // --- 【畝ロット管理】追加・編集モーダル ---
+    lotModal && React.createElement(LotFormModal, {
+      field,
+      lot: lotModal.lot,
+      existingLots: lots,
+      onSave: (lotData) => {
+        if (lotModal.lot) { onUpdateLot && onUpdateLot(field.id, lotData) }
+        else              { onAddLot && onAddLot(field.id, lotData) }
+      },
+      onClose: () => setLotModal(null),
+    }),
+
+    // --- 【畝ロット管理】削除確認 ---
+    lotDeleteTarget && React.createElement(ConfirmDeleteModal, {
+      title: '畝ロットを削除しますか？',
+      targetName: lotDeleteTarget.row_range + '畝　' + lotDeleteTarget.variety,
+      detail: '散布記録・収穫記録は削除されません（畝範囲のテキストは残ります）',
+      onCancel: () => setLotDeleteTarget(null),
+      onConfirm: () => { onDeleteLot && onDeleteLot(field.id, lotDeleteTarget.id); setLotDeleteTarget(null) },
+    })
   )
 }
 
@@ -5284,10 +5526,10 @@ function LotSprayRecordList({ records, pesticides, onDelete, field, staff }) {
 // 【フェーズE・E-4 Step4】LotSprayRecordSection — 「農薬散布記録」タブ本体
 // E-2の確定仕様「pesticide: ロット単位の散布記録一覧＋新規入力」に対応
 // ─────────────────────────────────────────────────────
-function LotSprayRecordSection({ field, lotSprayRecords, pesticides, onSave, onDelete, staff }) {
+function LotSprayRecordSection({ field, lotSprayRecords, pesticides, onSave, onDelete, staff, lots: lotsProp }) {
   const [showAddModal, setShowAddModal] = React.useState(false)
   const fieldSprayRecords = lotSprayRecords.filter(r => r.field_id === field.id)
-  const lots = LOTS[field.id] || []
+  const lots = lotsProp || []
 
   return React.createElement('div', null,
     React.createElement('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px' } },
@@ -5818,10 +6060,10 @@ function TopDressingRecordList({ records, fertilizers, onDelete, field, staff })
 // 【サンプル農園実データ統合 フェーズ4・Step4-1】TopDressingRecordSection
 // LotSprayRecordSectionと同構造（一覧＋新規入力モーダル）
 // ─────────────────────────────────────────────────────
-function TopDressingRecordSection({ field, topDressingRecords, fertilizers, onSave, onDelete, staff }) {
+function TopDressingRecordSection({ field, topDressingRecords, fertilizers, onSave, onDelete, staff, lots: lotsProp }) {
   const [showAddModal, setShowAddModal] = React.useState(false)
   const fieldRecords = (topDressingRecords || []).filter(r => r.field_id === field.id)
-  const lots = LOTS[field.id] || []
+  const lots = lotsProp || []
 
   return React.createElement('div', null,
     React.createElement('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px' } },
@@ -6733,7 +6975,7 @@ function HarvestRecordSection({ field, harvestRecords, lots, onSave, onDelete, d
 // sub='dashboard'|'rows'|'daily'|'pesticide'|'harvest' でコンテンツを切り替え
 // ─────────────────────────────────────────────────────
 // ── DailySection: 圃場別「日報」サブページ — 一覧メイン + 新規入力モーダル ──
-function DailySection({ field, fieldRecords, allRecords, pesticides, onSaveRecord, onUpdateRecord, onDeleteRecord }) {
+function DailySection({ field, fieldRecords, allRecords, pesticides, onSaveRecord, onUpdateRecord, onDeleteRecord, lotSprayRecords }) {
   const [showAddModal, setShowAddModal] = React.useState(false)
   return React.createElement('div', null,
     // ヘッダー行: タイトル + 新規入力ボタン
@@ -6766,7 +7008,7 @@ function DailySection({ field, fieldRecords, allRecords, pesticides, onSaveRecor
             style:{ background:'none', border:'none', cursor:'pointer', fontSize:'20px', color:'#9CA3AF', lineHeight:1, padding:'4px' }
           }, '✕')
         ),
-        React.createElement(RecordForm, { fields:[field], pesticides, records:allRecords, inModal:true, onSave: r => onSaveRecord({ ...r, field_id: field.id }) })
+        React.createElement(RecordForm, { fields:[field], pesticides, records:allRecords, lotSprayRecords, inModal:true, onSave: r => onSaveRecord({ ...r, field_id: field.id }) })
       )
     )
   )
@@ -6899,9 +7141,11 @@ function FieldDetailPage({ field, fields, records, pesticides, onSaveRecord, onU
   // 【実装手順書 Step2】出荷先マスタ
   destinations, onChangeDestinations,
   // 【実装手順書 C】担当者連携
-  staff }) {
+  staff,
+  // 【畝ロット管理】動的ロット + CRUD（旧・静的LOTSの置き換え）
+  lots, onAddLot, onUpdateLot, onDeleteLot }) {
   const fieldRecords = records.filter(r => r.field_id === field.id)
-  const fieldRows    = LOTS[field.id] || []
+  const fieldRows    = lots || []
   const [selectedRowNo, setSelectedRowNo] = React.useState(null)
 
   const statusClass = field.status === '栽培中' ? 'badge-green'
@@ -6924,7 +7168,8 @@ function FieldDetailPage({ field, fields, records, pesticides, onSaveRecord, onU
   // ── コンテンツ定義 ──
   const content = {
     dashboard: () => React.createElement(FieldDashboardSection, {
-      field, fieldRecords, fieldRows, pesticides, lotSprayRecords: lotSprayRecords || []
+      field, fieldRecords, fieldRows, pesticides, lotSprayRecords: lotSprayRecords || [],
+      onAddLot, onUpdateLot, onDeleteLot,
     }),
     crop_history: () => React.createElement(CropCycleHistorySection, {
       field, cropCycles: cropCycles || [], onAdd: onAddCropCycle,
@@ -6932,10 +7177,12 @@ function FieldDetailPage({ field, fields, records, pesticides, onSaveRecord, onU
       onComplete: onCompleteCropCycle,
     }),
     daily: () => React.createElement(DailySection, {
-      field, fieldRecords, allRecords:records, pesticides, onSaveRecord, onUpdateRecord, onDeleteRecord
+      field, fieldRecords, allRecords:records, pesticides, onSaveRecord, onUpdateRecord, onDeleteRecord,
+      lotSprayRecords: lotSprayRecords || []
     }),
     pesticide: () => React.createElement(LotSprayRecordSection, {
       field,
+      lots: fieldRows,
       lotSprayRecords: lotSprayRecords || [],
       pesticides,
       onSave: onSaveLotSprayRecord,
@@ -6948,6 +7195,7 @@ function FieldDetailPage({ field, fields, records, pesticides, onSaveRecord, onU
     // FieldDetailPageのタブ・contentマップに接続されていなかったため追加。
     topdressing: () => React.createElement(TopDressingRecordSection, {
       field,
+      lots: fieldRows,
       topDressingRecords: topDressingRecords || [],
       fertilizers: fertilizers || [],
       onSave: onSaveTopDressingRecord,
