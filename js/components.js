@@ -4125,7 +4125,11 @@ function estimateLocalStorageBytes() {
 }
 
 // ── RecordForm: フォーム専用ページ（旧 DailyRecord hideList:true）──
-function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayRecords }) {
+function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayRecords, farmLots, fertilizers, destinations, harvestRecords, staff, onSaveLotSpray, onSaveTopDressing, onSaveHarvest }) {
+  // 【入口一本化】農薬散布/施肥/収穫は畝まで記録するGAP用フォームに切り替える（リッチモード）。
+  // これらの保存コールバックが渡された時だけ有効。畝ごとの記録は単一圃場で行う。
+  const RICH_FORM = { '農薬散布':'spray', '施肥':'fert', '収穫':'harvest' }
+  const richMode = !!(onSaveLotSpray && onSaveTopDressing && onSaveHarvest)
   const STEPS = ['日付・圃場', '作業内容', '農薬/施肥', '確認・保存']
   const [step, setStep]         = React.useState(1)
   const [dilution, setDilution] = React.useState(1000)
@@ -4222,13 +4226,32 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
     () => React.createElement(RecordStep4, { form, dilution, selField, selP, isOver, onPrev:()=>setStep(3), onSave:handleSave, showContinueButton, onContinue:handleContinueInput }),
   ], [step, form, fields, pesticides, records, isOver, dilution, selField, selP, handlePesticideUpdate, showContinueButton, photoError])
 
+  // 農薬散布/施肥/収穫は畝まで記録するGAP用フォームへ切り替え（主圃場＝selFieldで畝ごとに記録）
+  const backToStep2 = () => setStep(2)
+  const renderRich = () => {
+    const kind = RICH_FORM[form.work_type]
+    const lots = (farmLots && farmLots[selField.id]) || []
+    const header = React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap' } },
+      React.createElement('button', { className:'btn btn-ghost', onClick:backToStep2 }, '← 作業内容'),
+      React.createElement('span', { style:{ fontSize:13, color:'#374151', fontWeight:600 } }, selField.name + '（' + selField.crop + '）'),
+      React.createElement('span', { style:{ fontSize:12, color:'#0A6B52' } }, '畝ごとに記録（GAP対応）'),
+      (form.field_ids && form.field_ids.length > 1) ? React.createElement('span', { style:{ fontSize:12, color:'#B45309' } }, '※畝の記録は主圃場のみ') : null
+    )
+    let el
+    if (kind === 'spray')     el = React.createElement(LotSprayRecordForm,    { field:selField, pesticides:pesticides||[], lots, staff, onCancel:backToStep2, onSave:(r)=>{ onSaveLotSpray(r); backToStep2() } })
+    else if (kind === 'fert') el = React.createElement(TopDressingRecordForm, { field:selField, fertilizers:fertilizers||[], lots, staff, onCancel:backToStep2, onSave:(r)=>{ onSaveTopDressing(r); backToStep2() } })
+    else                      el = React.createElement(HarvestRecordForm,     { field:selField, lots, destinations:destinations||[], harvestRecords:harvestRecords||[], staff, onCancel:backToStep2, onSave:onSaveHarvest })
+    return React.createElement('div', null, header, el)
+  }
+  const useRich = richMode && !!RICH_FORM[form.work_type] && !!selField && step >= 3
+
   return React.createElement('div', { className: inModal ? '' : 'page' },
     !inModal && React.createElement('div', { className:'eyebrow' }, 'DAILY REPORT'),
     !inModal && React.createElement('div', { className:'page-title' }, '日報入力'),
     !inModal && React.createElement('div', { className:'page-sub' }, '作業内容を記録してGAP書類を自動生成します'),
     React.createElement('div', { className: inModal ? '' : 'card' },
       React.createElement(StepBar, { step, steps:STEPS }),
-      stepComponents[step] && stepComponents[step]()
+      useRich ? renderRich() : (stepComponents[step] && stepComponents[step]())
     )
   )
 }

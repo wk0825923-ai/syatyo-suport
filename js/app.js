@@ -441,9 +441,11 @@
     harvest_forecast: () => React.createElement(HarvestForecastPage, {
       fields, farmLots, harvestRecords, cropCategories, monthlyTemps, onSaveMonthlyTemps: setMonthlyTemps,
     }),
-    // 【日報入力】全圃場から選択して入力（複数圃場の一括記録に対応する全体入口）
+    // 【日報入力】全圃場から選択して入力。農薬散布/施肥/収穫は畝まで記録するGAP用フォームに切替。
     daily_entry: () => React.createElement(RecordForm, {
       fields, pesticides, records, lotSprayRecords, onSave: onSaveRecordWithStock,
+      farmLots, fertilizers, destinations: shipmentDestinations, harvestRecords, staff,
+      onSaveLotSpray: onSaveLotSprayRecord, onSaveTopDressing: onSaveTopDressingRecord, onSaveHarvest: onSaveHarvestRecord,
     }),
     // 【機械整備記録】GAP機械管理（純追加・専用キー）
     maintenance_log: () => React.createElement(MaintenanceLogPage, {
