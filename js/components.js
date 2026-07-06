@@ -7245,7 +7245,7 @@ function HarvestRecordSection({ field, harvestRecords, lots, onSave, onDelete, d
 // sub='dashboard'|'rows'|'daily'|'pesticide'|'harvest' でコンテンツを切り替え
 // ─────────────────────────────────────────────────────
 // ── DailySection: 圃場別「日報」サブページ — 一覧メイン + 新規入力モーダル ──
-function DailySection({ field, fieldRecords, allRecords, pesticides, onSaveRecord, onUpdateRecord, onDeleteRecord, lotSprayRecords }) {
+function DailySection({ field, fieldRecords, allRecords, pesticides, onSaveRecord, onUpdateRecord, onDeleteRecord, lotSprayRecords, farmLots, fertilizers, destinations, harvestRecords, staff, onSaveLotSpray, onSaveTopDressing, onSaveHarvest }) {
   const [showAddModal, setShowAddModal] = React.useState(false)
   return React.createElement('div', null,
     // ヘッダー行: タイトル + 新規入力ボタン
@@ -7278,7 +7278,8 @@ function DailySection({ field, fieldRecords, allRecords, pesticides, onSaveRecor
             style:{ background:'none', border:'none', cursor:'pointer', fontSize:'20px', color:'#9CA3AF', lineHeight:1, padding:'4px' }
           }, '✕')
         ),
-        React.createElement(RecordForm, { fields:[field], pesticides, records:allRecords, lotSprayRecords, inModal:true, onSave: r => onSaveRecord({ ...r, field_id: field.id }) })
+        React.createElement(RecordForm, { fields:[field], pesticides, records:allRecords, lotSprayRecords, inModal:true, onSave: r => onSaveRecord({ ...r, field_id: field.id }),
+          farmLots, fertilizers, destinations, harvestRecords, staff, onSaveLotSpray, onSaveTopDressing, onSaveHarvest })
       )
     )
   )
@@ -7448,7 +7449,10 @@ function FieldDetailPage({ field, fields, records, pesticides, onSaveRecord, onU
     }),
     daily: () => React.createElement(DailySection, {
       field, fieldRecords, allRecords:records, pesticides, onSaveRecord, onUpdateRecord, onDeleteRecord,
-      lotSprayRecords: lotSprayRecords || []
+      lotSprayRecords: lotSprayRecords || [],
+      // 【入口一本化】農薬散布/施肥/収穫は畝対応フォームに切替（トップの日報入力と同じ挙動）
+      farmLots: { [field.id]: (fieldRows || []) }, fertilizers, destinations, harvestRecords, staff,
+      onSaveLotSpray: onSaveLotSprayRecord, onSaveTopDressing: onSaveTopDressingRecord, onSaveHarvest: onSaveHarvestRecord,
     }),
     pesticide: () => React.createElement(LotSprayRecordSection, {
       field,
