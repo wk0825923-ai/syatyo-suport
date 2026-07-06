@@ -5408,13 +5408,19 @@ function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff }
     letterSpacing:'.05em', textTransform:'uppercase', marginBottom:'4px', display:'block'
   }
 
+  // 農薬マスタは希釈倍率を持たないため、作物別の推奨希釈(RECOMMENDED_DILUTIONS)から引く。
+  // 該当が無ければ空文字（undefinedを入れると controlled→uncontrolled 警告になるため必ず ''）。
+  const recDilution = (pid) => {
+    const list = (typeof RECOMMENDED_DILUTIONS !== 'undefined' && field) ? RECOMMENDED_DILUTIONS[field.crop] : null
+    const hit  = list && list.find(r => r.pesticide_id === Number(pid))
+    return (hit && hit.dilution != null) ? hit.dilution : ''
+  }
   const updateItem = (idx, patch) => setItems(prev => prev.map((it, i) => i === idx ? { ...it, ...patch } : it))
-  const addItem    = () => setItems(prev => [...prev, { pesticide_id: pesticides[0]?.id ?? '', dilution: pesticides[0]?.dilution ?? '', disposal_amount: '' }])
+  const addItem    = () => setItems(prev => [...prev, { pesticide_id: pesticides[0]?.id ?? '', dilution: recDilution(pesticides[0]?.id), disposal_amount: '' }])
   const removeItem = (idx) => setItems(prev => prev.filter((_, i) => i !== idx))
 
   const handlePesticideChange = (idx, id) => {
-    const p = pesticides.find(x => x.id === Number(id))
-    updateItem(idx, { pesticide_id: Number(id), dilution: p ? p.dilution : '' })
+    updateItem(idx, { pesticide_id: Number(id), dilution: recDilution(id) })
   }
 
   // rowRange（テキスト）が最終的な保存値。マップ選択→自動変換 or 手動入力どちらでも同じstateに入る。
@@ -5527,7 +5533,7 @@ function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff }
         },
           React.createElement('div', { style:{ display:'flex', gap:'8px', alignItems:'center' } },
             React.createElement('select', {
-              value: it.pesticide_id,
+              value: it.pesticide_id ?? '',
               onChange: e => handlePesticideChange(idx, e.target.value),
               style: { ...inputStyle, flex:2, background:'#FFFFFF' }
             },
@@ -5535,7 +5541,7 @@ function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff }
             ),
             React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:'4px', flex:1 } },
               React.createElement('input', {
-                type:'number', value:it.dilution,
+                type:'number', value:it.dilution ?? '',
                 onChange: e => updateItem(idx, { dilution: e.target.value }),
                 style: { ...inputStyle, background:'#FFFFFF' }
               }),
@@ -5553,7 +5559,7 @@ function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff }
             ),
             React.createElement('input', {
               type:'number', step:'0.1', min:'0', placeholder:'0',
-              value: it.disposal_amount,
+              value: it.disposal_amount ?? '',
               onChange: e => updateItem(idx, { disposal_amount: e.target.value }),
               style: { ...inputStyle, background:'#FFFFFF', maxWidth:'110px' }
             }),
@@ -15509,12 +15515,25 @@ function usePersistState(key, initial) {
     try {
       const saved = localStorage.getItem(key)
       return saved ? JSON.parse(saved) : initial
-    } catch { return initial }
+    } catch (e) {
+      // 破損データは初期値に戻すが、握り潰さず必ず警告（引き継ぎ時の調査のため）
+      console.warn('[usePersistState] 読込失敗（初期値に復帰）:', key, e)
+      return initial
+    }
   })
   const setPersist = React.useCallback(updater => {
     setState(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater
-      try { localStorage.setItem(key, JSON.stringify(next)) } catch {}
+      try {
+        localStorage.setItem(key, JSON.stringify(next))
+      } catch (e) {
+        // 保存失敗（多くは容量超過）は"見える化"する。データ消失に気づけないのが最大のリスクのため。
+        console.warn('[usePersistState] 保存失敗:', key, e)
+        if (typeof window !== 'undefined' && !window.__storageWarned) {
+          window.__storageWarned = true
+          try { alert('データの保存に失敗しました。ブラウザの空き容量が不足している可能性があります。\n写真の枚数を減らすか、不要なデータを整理してください。（詳細はブラウザのコンソール）') } catch (_) {}
+        }
+      }
       return next
     })
   }, [key])
