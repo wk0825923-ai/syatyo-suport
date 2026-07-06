@@ -8126,6 +8126,24 @@ function FieldTablePage({ fields, onAdd, onDelete, cropCycles, onNavigate, cropC
 // records（日報）とは別テーブルのため、field_id + row_range の重なりで突合する。
 // 畝未指定（row_range空）の記録はどのロットにも属さないため、末尾に「畝未指定」件数を明示。
 // =====================================================
+// 原価が「概算」であることを分かりやすく誘導するバナー（今福さんの入力を促す）。
+// 肥料マスタで単価が未入力の品目があれば件数も動的表示。原価を出す画面の上部に置く。
+function costApproxBanner(fertilizers) {
+  const miss = (fertilizers || []).filter(f => f && f.unit_price_yen_per_kg == null).length
+  return React.createElement('div', {
+    style:{ display:'flex', gap:10, alignItems:'flex-start', background:'#FFFBEB', border:'1px solid #FDE68A', borderRadius:10, padding:'12px 16px', marginBottom:16 }
+  },
+    React.createElement('span', { style:{ fontSize:18, lineHeight:1.2 } }, '💡'),
+    React.createElement('div', null,
+      React.createElement('div', { style:{ fontSize:13, fontWeight:700, color:'#92400E', marginBottom:2 } }, '原価は現在「概算」です'),
+      React.createElement('div', { style:{ fontSize:12, color:'#B45309', lineHeight:1.6 } },
+        '肥料マスタの単価・重量、農薬の購入実績を入力すると、原価は自動で正確になります。' +
+        (miss > 0 ? `（単価が未入力の肥料：${miss}品目）` : '')
+      )
+    )
+  )
+}
+
 function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecords, harvestRecords, pesticides, fertilizers, pesticidePurchases }) {
   farmLots = farmLots || {}
   const [season, setSeason]       = React.useState('all')
@@ -8498,6 +8516,7 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
     headerEl,
     filterBar,
     summaryRow,
+    costApproxBanner(fertilizers),
     visible.length === 0
       ? React.createElement('div', { style:{ ...card, textAlign:'center', color:'#9CA3AF', fontSize:13, padding:'32px' } }, '該当するロットがありません（フィルタ条件を変更してください）')
       : fieldGrid,
