@@ -5675,8 +5675,12 @@ function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff }
   const valid = !!date && rowRange.trim() !== '' && Number(sprayVolume) > 0 &&
     items.length > 0 && items.every(it => it.pesticide_id && Number(it.dilution) > 0)
 
+  const submittingRef = React.useRef(false)
   const handleSubmit = () => {
     if (!valid) return
+    if (submittingRef.current) return   // 連打による二重登録を防止
+    submittingRef.current = true
+    setTimeout(() => { submittingRef.current = false }, 1200)
     onSave({
       field_id: field.id,
       date,
@@ -6176,8 +6180,12 @@ function TopDressingRecordForm({ field, fertilizers, lots, onSave, onCancel, sta
   const valid = !!date && rowRange.trim() !== '' &&
     items.length > 0 && items.every(it => it.fertilizer_id && (Number(it.dilution) > 0 || Number(it.amount_kg) > 0))
 
+  const submittingRef = React.useRef(false)
   const handleSubmit = () => {
     if (!valid) return
+    if (submittingRef.current) return   // 連打による二重登録を防止
+    submittingRef.current = true
+    setTimeout(() => { submittingRef.current = false }, 1200)
     onSave({
       field_id: field.id,
       date,
@@ -6837,8 +6845,12 @@ function HarvestRecordForm({ field, lots, destinations, harvestRecords, onSave, 
   const canSave    = form.date && form.variety.trim() && form.row_range.trim()
                     && shipments.length > 0 && shipments.some(r => Number(r.cases) > 0)
 
+  const submittingRef = React.useRef(false)
   const handleSave = () => {
     if (!canSave) return
+    if (submittingRef.current) return   // 連打による二重登録を防止
+    submittingRef.current = true
+    setTimeout(() => { submittingRef.current = false }, 1200)
     const filledRows = shipments.filter(r => Number(r.cases) > 0)
     onSave({
       field_id:    field.id,
