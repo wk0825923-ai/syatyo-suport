@@ -474,10 +474,24 @@ const SEV_META = {
   mid:  { label:'要確認', color:'#B45309', bg:'#FFFBEB', border:'#FDE68A', icon:'alert-circle' },
   low:  { label:'参考',   color:'#0369A1', bg:'#F0F9FF', border:'#BAE6FD', icon:'info-circle' },
 }
+// 初見の人向け: 所見が出ていない空状態で「このチェックが何を見ているか」を示す例。
+// 実際の突合せ(runFarmIntegrityChecks)の主要カテゴリを平易な言葉にしたもの。
+const INTEGRITY_CHECK_EXAMPLES = [
+  '農薬の年間使用回数が上限を超えていないか（GAP違反）',
+  '収穫前日数(PHI)を空けずに農薬を散布していないか',
+  '出荷量が収穫量を上回っていないか（在庫マイナス）',
+  '未来の日付や、定植より前の収穫など日付の矛盾がないか',
+  '天気・作業者・品種などの記入漏れがないか',
+  '同じ作業の二重登録（収穫の二重計上）がないか',
+]
 function FarmIntegrityPage(props) {
   const findings = React.useMemo(() => {
     try { return runFarmIntegrityChecks(props) } catch (e) { return [] }
   }, [props.records, props.lotSprayRecords, props.topDressingRecords, props.harvestRecords, props.shipmentRecords, props.farmLots, props.fields, props.pesticides, props.pesticidePurchases])
+  // 点検対象になる「作業記録」が1件でもあるか。空なら"クリーン"ではなく"まだ点検対象が無い"と示す。
+  const hasCheckableData = [
+    props.records, props.lotSprayRecords, props.topDressingRecords, props.harvestRecords, props.shipmentRecords,
+  ].some(arr => Array.isArray(arr) && arr.length > 0)
   const counts = { high:0, mid:0, low:0 }
   findings.forEach(f => { counts[f.severity] = (counts[f.severity] || 0) + 1 })
   const onNavigate = props.onNavigate
@@ -501,10 +515,30 @@ function FarmIntegrityPage(props) {
     ),
 
     findings.length === 0
-      ? React.createElement('div', { style:{ background:'#ECFDF5', border:'1px solid #A7F3D0', borderRadius:14, padding:'32px 20px', textAlign:'center' } },
-          React.createElement('div', { style:{ fontSize:40, marginBottom:8 } }, '✅'),
-          React.createElement('div', { style:{ fontSize:16, fontWeight:800, color:'#065F46', marginBottom:4 } }, '食い違いは見つかりませんでした'),
-          React.createElement('div', { style:{ fontSize:13, color:'#4B5563' } }, '記録同士の突合せで、要対応の不整合はありません。')
+      ? (hasCheckableData
+          // 記録があって、かつ不整合なし＝本当にクリーン
+          ? React.createElement('div', { style:{ background:'#ECFDF5', border:'1px solid #A7F3D0', borderRadius:14, padding:'32px 20px', textAlign:'center' } },
+              React.createElement('div', { style:{ fontSize:40, marginBottom:8 } }, '✅'),
+              React.createElement('div', { style:{ fontSize:16, fontWeight:800, color:'#065F46', marginBottom:4 } }, '食い違いは見つかりませんでした'),
+              React.createElement('div', { style:{ fontSize:13, color:'#4B5563' } }, '記録同士の突合せで、要対応の不整合はありません。')
+            )
+          // 記録がまだ無い＝点検対象が無いだけ。初見の人が「点検された」と誤解しないよう明示。
+          : React.createElement('div', { style:{ background:'#F8FAFC', border:'1px solid #E2E8F0', borderRadius:14, padding:'28px 22px' } },
+              React.createElement('div', { style:{ textAlign:'center', marginBottom:18 } },
+                React.createElement('div', { style:{ fontSize:38, marginBottom:8 } }, '📋'),
+                React.createElement('div', { style:{ fontSize:16, fontWeight:800, color:'#334155', marginBottom:4 } }, 'まだ点検できる記録がありません'),
+                React.createElement('div', { style:{ fontSize:13, color:'#64748B' } }, '日報や農薬・収穫の記録を入力すると、ここで自動的に食い違いを点検します。')
+              ),
+              React.createElement('div', { style:{ fontSize:12, fontWeight:700, color:'#475569', marginBottom:8 } }, 'このチェックで見ている主な項目'),
+              React.createElement('div', { style:{ display:'flex', flexDirection:'column', gap:7 } },
+                ...INTEGRITY_CHECK_EXAMPLES.map((ex, i) =>
+                  React.createElement('div', { key:i, style:{ display:'flex', gap:8, alignItems:'flex-start', fontSize:12.5, color:'#475569' } },
+                    React.createElement('i', { className:'ti ti-check', style:{ fontSize:14, color:'#0A6B52', marginTop:2, flexShrink:0 } }),
+                    React.createElement('span', null, ex)
+                  )
+                )
+              )
+            )
         )
       : React.createElement('div', { style:{ display:'flex', flexDirection:'column', gap:12 } },
           ...findings.map(f => {
