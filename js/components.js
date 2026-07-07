@@ -8542,7 +8542,10 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
 
   // ── CSV出力（管理表シート相当・Excel向けにBOM付与） ──
   const csvCell = (v) => {
-    const s = v == null ? '' : String(v)
+    let s = v == null ? '' : String(v)
+    // CSVインジェクション対策: 圃場名・品種などに = + @ 等が入るとExcel/Sheetsが数式として
+    // 実行してしまう。数式トリガー文字始まりで通常の数値でないセルは先頭に ' を付けて無害化。
+    if (/^[=+\-@\t\r]/.test(s) && !/^[+-]?\d/.test(s)) s = "'" + s
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
   }
   const downloadCsv = () => {
