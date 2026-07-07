@@ -436,3 +436,52 @@
       /* 確認テーブルのラベル固定幅を狭幅では詰める（値の潰れ防止） */
       .staff-view .card [style*="width: 120px"], .staff-view .card [style*="width:120px"]{ width:92px !important; }
     }
+
+/* ── エラー/通知トースト（showToast） 画面右上に積む ── */
+#sb-toast-wrap{
+  position:fixed; top:16px; right:16px; z-index:99999;
+  display:flex; flex-direction:column; gap:10px;
+  max-width:min(380px, calc(100vw - 32px)); pointer-events:none;
+}
+.sb-toast{
+  display:flex; align-items:flex-start; gap:10px;
+  background:#fff; border:1px solid #E5E7EB; border-left:4px solid #6B7280;
+  border-radius:10px; padding:12px 12px 12px 14px;
+  box-shadow:0 8px 24px rgba(15,23,42,.16);
+  font-size:13px; line-height:1.5; color:#1F2937;
+  pointer-events:auto; opacity:0; transform:translateX(16px);
+  transition:opacity .22s ease, transform .22s ease;
+}
+.sb-toast.in{ opacity:1; transform:translateX(0); }
+.sb-toast.out{ opacity:0; transform:translateX(16px); }
+.sb-toast-icon{ font-size:18px; flex-shrink:0; margin-top:1px; }
+.sb-toast-msg{ flex:1; word-break:break-word; }
+.sb-toast-close{
+  flex-shrink:0; background:none; border:none; cursor:pointer;
+  font-size:18px; line-height:1; color:#9CA3AF; padding:0 2px; margin:-2px -2px 0 0;
+}
+.sb-toast-close:hover{ color:#4B5563; }
+.sb-toast-error  { border-left-color:#DC2626; } .sb-toast-error   .sb-toast-icon{ color:#DC2626; }
+.sb-toast-warn   { border-left-color:#B45309; } .sb-toast-warn    .sb-toast-icon{ color:#B45309; }
+.sb-toast-success{ border-left-color:#0A6B52; } .sb-toast-success .sb-toast-icon{ color:#0A6B52; }
+.sb-toast-info   { border-left-color:#1D4ED8; } .sb-toast-info    .sb-toast-icon{ color:#1D4ED8; }
+@media (max-width:640px){
+  #sb-toast-wrap{ top:auto; bottom:12px; right:12px; left:12px; max-width:none; }
+}
+@media (prefers-reduced-motion: reduce){
+  .sb-toast{ transition:opacity .15s ease; transform:none; }
+  .sb-toast.in, .sb-toast.out{ transform:none; }
+}
+
+/* ── ErrorBoundary フォールバック（画面クラッシュ時） ── */
+.sb-eb-fallback{
+  max-width:520px; margin:48px auto; text-align:center;
+  background:#FFF7F5; border:1px solid #FCA5A5; border-radius:16px; padding:36px 28px;
+}
+.sb-eb-title{ font-size:17px; font-weight:800; color:#7F1D1D; margin-bottom:8px; }
+.sb-eb-sub{ font-size:13px; color:#6B7280; line-height:1.7; margin-bottom:18px; }
+.sb-eb-btn{
+  background:#0A6B52; color:#fff; border:none; border-radius:10px;
+  padding:10px 22px; font-size:14px; font-weight:700; cursor:pointer;
+}
+.sb-eb-btn:hover{ background:#085A45; }

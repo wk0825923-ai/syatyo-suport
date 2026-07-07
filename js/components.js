@@ -4388,6 +4388,67 @@ function celebrateSave(message) {
   } catch (e) {}
 }
 
+// 【エラー/通知トースト】showToast — 画面右上に積み上がる通知。エラーは目立つ赤、警告は橙、
+// 成功/情報は緑。celebrateSaveと同じくDOM直生成なので、Reactの外(素のalert置換・未捕捉エラー・
+// ErrorBoundary)からも1行で呼べる。メッセージはescHtmlでエスケープ。同一メッセージの連投は抑制。
+function showToast(message, type) {
+  try {
+    const meta = ({
+      error:   { icon:'alert-triangle', cls:'error',   ttl: 8000 },
+      warn:    { icon:'alert-circle',   cls:'warn',    ttl: 6000 },
+      success: { icon:'circle-check',   cls:'success', ttl: 3500 },
+      info:    { icon:'info-circle',    cls:'info',    ttl: 4500 },
+    })[type || 'info'] || { icon:'info-circle', cls:'info', ttl: 4500 }
+    let wrap = document.getElementById('sb-toast-wrap')
+    if (!wrap) { wrap = document.createElement('div'); wrap.id = 'sb-toast-wrap'; document.body.appendChild(wrap) }
+    // 同じ文言のトーストが既に出ていれば連投しない（エラーループでの氾濫を防ぐ）
+    if ([...wrap.querySelectorAll('.sb-toast-msg')].some(n => n.textContent === String(message == null ? '' : message))) return
+    const esc = (typeof escHtml === 'function') ? escHtml : (s) => String(s == null ? '' : s)
+    const el = document.createElement('div')
+    el.className = 'sb-toast sb-toast-' + meta.cls
+    el.innerHTML =
+      '<i class="ti ti-' + meta.icon + ' sb-toast-icon" aria-hidden="true"></i>' +
+      '<span class="sb-toast-msg">' + esc(message) + '</span>' +
+      '<button class="sb-toast-close" aria-label="閉じる">×</button>'
+    wrap.appendChild(el)
+    requestAnimationFrame(() => el.classList.add('in'))
+    const dismiss = () => {
+      if (el.__gone) return; el.__gone = true
+      el.classList.remove('in'); el.classList.add('out')
+      setTimeout(() => { try { el.remove() } catch (_) {} }, 260)
+    }
+    el.querySelector('.sb-toast-close').addEventListener('click', dismiss)
+    setTimeout(dismiss, meta.ttl)
+    return dismiss
+  } catch (e) { try { console.warn('[showToast]', e) } catch (_) {} }
+}
+
+// 【描画エラーの受け皿】ErrorBoundary — ページ描画中に例外が起きても画面全体が白くならないよう、
+// その画面だけをフォールバックUIに差し替える（サイドバーは生きたまま）。トーストで気づけるようにし、
+// ページ移動(resetKeyの変化)で自動的にエラー状態を解除して再挑戦する。
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null } }
+  static getDerivedStateFromError(error) { return { error } }
+  componentDidCatch(error, info) {
+    try { console.error('[ErrorBoundary]', error, info) } catch (_) {}
+    try { showToast('画面の表示中に問題が発生しました。操作をやり直すか、再読み込みしてください。', 'error') } catch (_) {}
+  }
+  componentDidUpdate(prevProps) {
+    if (this.state.error && prevProps.resetKey !== this.props.resetKey) this.setState({ error: null })
+  }
+  render() {
+    if (this.state.error) {
+      return React.createElement('div', { className:'sb-eb-fallback' },
+        React.createElement('div', { style:{ fontSize:40, marginBottom:10 } }, '⚠️'),
+        React.createElement('div', { className:'sb-eb-title' }, 'この画面を表示できませんでした'),
+        React.createElement('div', { className:'sb-eb-sub' }, '一時的な不具合の可能性があります。ほかの画面に切り替えるか、再読み込みしてください。入力済みのデータは保存されています。'),
+        React.createElement('button', { className:'sb-eb-btn', onClick: () => { try { location.reload() } catch (_) {} } }, '再読み込み')
+      )
+    }
+    return this.props.children
+  }
+}
+
 // 現在のlocalStorage使用量(概算バイト・UTF-16換算)。写真追加前の容量ガードに使用。
 function estimateLocalStorageBytes() {
   let total = 0
@@ -9942,12 +10003,12 @@ function useGapBase({ gap, records, fields, pesticides, ctx }) {
   const handleExportPDF = async () => {
     setExporting(true)
     try { await exportSprayPDF(records, fields, pesticides) }
-    catch(e) { alert('PDF出力に失敗しました: ' + e.message) }
+    catch(e) { showToast('PDF出力に失敗しました: ' + e.message, 'error') }
     finally  { setExporting(false) }
   }
   const handleExportExcel = () => {
     try { exportFertilizerExcel(records, fields) }
-    catch(e) { alert('Excel出力に失敗しました: ' + e.message) }
+    catch(e) { showToast('Excel出力に失敗しました: ' + e.message, 'error') }
   }
 
   return { open, setOpen, exporting, cats, total, done, pct, sprayCount, isDone,
@@ -10318,7 +10379,7 @@ function GapExport({ gap, records, fields, pesticides, ctx }) {
       setTimeout(() => setPackageToast(null), 3000)
       setTimeout(() => setJustCompleted(false), 4000)
     } catch (e) {
-      alert('書類パッケージの生成に失敗しました: ' + e.message)
+      showToast('書類パッケージの生成に失敗しました: ' + e.message, 'error')
     } finally {
       setIsGenerating(false)
     }
@@ -13077,7 +13138,7 @@ function CropPlan({ fields, plans, records, pesticides, onAdd, onDelete }) {
   const handleExportPDF = async () => {
     setExporting(true)
     try { await exportCropPlanPDF(plans, fields) }
-    catch(e) { alert('PDF出力に失敗しました: '+e.message) }
+    catch(e) { showToast('PDF出力に失敗しました: '+e.message, 'error') }
     finally { setExporting(false) }
   }
 
@@ -15851,7 +15912,7 @@ function usePersistState(key, initial) {
         console.warn('[usePersistState] 保存失敗:', key, e)
         if (typeof window !== 'undefined' && !window.__storageWarned) {
           window.__storageWarned = true
-          try { alert('データの保存に失敗しました。ブラウザの空き容量が不足している可能性があります。\n写真の枚数を減らすか、不要なデータを整理してください。（詳細はブラウザのコンソール）') } catch (_) {}
+          try { showToast('データの保存に失敗しました。ブラウザの空き容量が不足している可能性があります。写真を減らすか不要なデータを整理してください。', 'error') } catch (_) {}
         }
       }
       return next

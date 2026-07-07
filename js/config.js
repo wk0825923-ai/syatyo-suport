@@ -394,7 +394,7 @@ async function exportSingleSprayRecordPDF(record, fields, pesticides) {
     pdf.save('農薬散布記録_' + record.date + '.pdf')
   } catch (err) {
     console.error('PDF出力エラー:', err)
-    alert('PDF出力に失敗しました。\n' + err.message)
+    showToast('PDF出力に失敗しました: ' + err.message, 'error')
   } finally {
     el.innerHTML = ''
   }
@@ -464,7 +464,7 @@ async function exportSprayPDF(records, fields, pesticides) {
     pdf.save('農薬散布記録簿_農場名.pdf')
   } catch (err) {
     console.error('PDF出力エラー:', err)
-    alert('PDF出力に失敗しました。\n' + err.message)
+    showToast('PDF出力に失敗しました: ' + err.message, 'error')
   } finally {
     // 成功・失敗いずれの場合もプレビューをリセット
     el.innerHTML = ''
@@ -480,7 +480,7 @@ function exportFertilizerExcel(records, fields) {
 
   // CAT-07-2: 0件の場合は空ファイルを渡すのではなく早期returnでユーザーに通知
   if (fertRecords.length === 0) {
-    alert('施肥記録がまだありません。\n日次作業入力から施肥作業を記録してください。')
+    showToast('施肥記録がまだありません。日次作業入力から施肥作業を記録してください。', 'warn')
     return
   }
 

@@ -16,6 +16,16 @@
       document.body.appendChild(s)
     }
   }, [])
+  // 【エラーの受け皿】ErrorBoundaryが拾えない非同期・イベントハンドラ内の例外や未処理のPromise拒否を
+  // トーストで可視化する（黙って失敗するのを防ぐ）。リソース404(img/script)は e.error が無いので除外し、
+  // 通知の氾濫を避ける。
+  React.useEffect(() => {
+    const onErr = (e) => { if (!e || !e.error) return; try { showToast('エラーが発生しました: ' + (e.error.message || '不明なエラー'), 'error') } catch (_) {} }
+    const onRej = (e) => { const r = e && e.reason; try { showToast('処理に失敗しました: ' + ((r && r.message) || (typeof r === 'string' ? r : '') || '不明なエラー'), 'error') } catch (_) {} }
+    window.addEventListener('error', onErr)
+    window.addEventListener('unhandledrejection', onRej)
+    return () => { window.removeEventListener('error', onErr); window.removeEventListener('unhandledrejection', onRej) }
+  }, [])
   // 【まっさら表示】?reset で現在ブラウザの農場ローカルデータ(farm_*)を消去して空状態に。
   // デモの逆。ログイン状態(sb-*)は保持。消去後はクリーンURLへ遷移してリロード。
   React.useEffect(() => {
@@ -562,7 +572,8 @@
       authUser,
       onEnterStaff: () => setViewMode('staff'),
     }),
-    React.createElement('main',  { className:'main' }, mainContent)
+    React.createElement('main',  { className:'main' },
+      React.createElement(ErrorBoundary, { resetKey: page }, mainContent))
   )
 }
 
