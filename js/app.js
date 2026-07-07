@@ -401,6 +401,8 @@
     fields:            () => React.createElement(FieldTablePage, { fields, onAdd:f=>{setFields(p=>[...p,f]);celebrateSave('圃場を追加！')}, onDelete:id=>setFields(p=>p.filter(f=>f.id!==id)), cropCycles, onNavigate:setPage, cropCategories }),
     crop_plan:         () => React.createElement(CropPlan,    { fields, plans:cropPlans, records, pesticides, onAdd:p=>{setCropPlans(prev=>[...prev,p]);celebrateSave('作付計画を追加！')}, onDelete:id=>setCropPlans(prev=>prev.filter(p=>p.id!==id)) }),
     gap:               () => React.createElement(GapChecklist, { gap, onToggle:id=>setGap(p=>p.map(c=>c.id===id?{...c,is_cleared:!c.is_cleared}:c)), ctx:{ records, lotSprayRecords, pesticides, pesticidePurchases, topDressingRecords, fertilizerPurchases, harvestRecords, shipmentRecords, maintenanceRecords, staff, farmLots } }),
+    // 【突合せ】記録の食い違い・入力ミスを横断点検（原因と対処つき）
+    integrity_check:   () => React.createElement(FarmIntegrityPage, { records, lotSprayRecords, topDressingRecords, harvestRecords, shipmentRecords, farmLots, fields, pesticides, fertilizers, pesticideStock, pesticidePurchases, fertilizerStock, fertilizerPurchases, onNavigate:setPage }),
     gap_package:       () => React.createElement(GapExport,   { gap, onToggle:id=>setGap(p=>p.map(c=>c.id===id?{...c,is_cleared:!c.is_cleared}:c)), records, fields, pesticides, ctx:{ records, lotSprayRecords, pesticides, pesticidePurchases, topDressingRecords, fertilizerPurchases, harvestRecords, shipmentRecords, maintenanceRecords, staff, farmLots } }),
     staff:             () => React.createElement(StaffList,   { staff, onAdd:s=>{setStaff(p=>[...p,s]);celebrateSave('スタッフを追加！')}, onDelete:id=>setStaff(p=>p.filter(s=>s.id!==id)), onUpdate:s=>setStaff(p=>p.map(x=>x.id===s.id?s:x)) }),
     // 【実装手順書 A】技能実習生 作業日誌

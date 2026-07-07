@@ -652,6 +652,174 @@ INITIAL_GAP_CHECKS.forEach(c => {
   c.schemes  = _GAP_GGAP_LEANING.has(c.id) ? ['GGAP'] : ['JGAP', 'GGAP']
   c.evidence = c.auto ? (_GAP_EVIDENCE[c.auto] || '記録') : null
 })
+// =====================================================
+// 【突合せ / 整合性チェック】人的な入力ミスや記録同士の食い違いを横断で洗い出す。
+// 1年運用しても手戻りを最小化するため、記録を突き合わせて「原因」と「対処」まで示す。
+// 返り値: [{ id, severity:'high'|'mid'|'low', category, title, detail, cause, fix, refs:[{kind,id,label}] }]
+// 純関数（stateを変更しない）。データ形状のゆれに強いよう各チェックはtry/catchで隔離。
+// parseRowRange は components.js のグローバル関数を利用（読み込み順で定義済み）。
+// =====================================================
+function runFarmIntegrityChecks(ctx) {
+  ctx = ctx || {}
+  const findings   = []
+  const records    = ctx.records || []
+  const sprays     = ctx.lotSprayRecords || []
+  const ferts      = ctx.topDressingRecords || []
+  const harvests   = ctx.harvestRecords || []
+  const shipments  = ctx.shipmentRecords || []
+  const fields     = ctx.fields || []
+  const lotsMap    = ctx.farmLots || {}
+  const pesticides = ctx.pesticides || []
+  const today  = new Date().toISOString().slice(0, 10)
+  const fname  = (id) => { const f = fields.find(x => x.id === id); return f ? f.name : ('圃場#' + id) }
+  const pById  = (id) => pesticides.find(p => p.id === id)
+  const days   = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000)
+  const yearOf = (d) => (d || '').slice(0, 4)
+  const rowset = (s) => (typeof parseRowRange === 'function' ? parseRowRange(s) : new Set())
+  let seq = 0
+  const push = (o) => findings.push(Object.assign({ id: 'chk' + (++seq), refs: [] }, o))
+  const run  = (fn) => { try { fn() } catch (e) { /* 1チェックの失敗で全体を止めない */ } }
+
+  // 農薬適用イベントを正規化（畝別散布 + 基本日報の農薬散布）
+  const sprayEvents = []
+  sprays.forEach(r => (r.pesticides || []).forEach(p =>
+    sprayEvents.push({ field_id: r.field_id, date: r.date, row_range: r.row_range, pesticide_id: p.pesticide_id, dilution: p.dilution, spray_volume_L: r.spray_volume_L, src: { kind: 'spray', id: r.id } })))
+  records.filter(r => r.work_type === '農薬散布' && r.pesticide_id).forEach(r =>
+    sprayEvents.push({ field_id: r.field_id, date: r.date, row_range: r.row_range, pesticide_id: r.pesticide_id, src: { kind: 'record', id: r.id } }))
+
+  // H2 農薬の年間使用回数オーバー（GAP違反）
+  run(() => {
+    const cnt = {}
+    sprayEvents.forEach(e => { const k = e.field_id + '|' + e.pesticide_id + '|' + yearOf(e.date); (cnt[k] = cnt[k] || []).push(e) })
+    Object.entries(cnt).forEach(([k, evs]) => {
+      const [fid, pid, yr] = k.split('|')
+      const p = pById(Number(pid)); if (!p || !p.max_times) return
+      if (evs.length > p.max_times) push({
+        severity: 'high', category: '農薬', title: p.name + ' の使用回数オーバー',
+        detail: fname(Number(fid)) + ' で ' + yr + '年に ' + evs.length + '回（上限 ' + p.max_times + '回）',
+        cause: '同じ圃場で同じ農薬を上限より多く使用（記録ミス、または実際の使用超過）。',
+        fix: '誤登録なら記録を訂正、実使用なら次作で剤をローテーション。',
+        refs: evs.map(e => ({ kind: e.src.kind, id: e.src.id, label: e.date })),
+      })
+    })
+  })
+
+  // H3 収穫前日数(PHI)違反の疑い
+  run(() => {
+    harvests.forEach(h => {
+      const hset = h.row_range ? rowset(h.row_range) : null
+      sprayEvents.filter(e => e.field_id === h.field_id && e.date && h.date && e.date <= h.date).forEach(e => {
+        const p = pById(e.pesticide_id); if (!p || p.preharvest_days == null) return
+        const gap = days(e.date, h.date)
+        if (gap < p.preharvest_days) {
+          if (hset && e.row_range) { const eset = rowset(e.row_range); if (![...eset].some(n => hset.has(n))) return }
+          push({
+            severity: 'high', category: '食品安全', title: '収穫前日数(PHI)違反の疑い: ' + p.name,
+            detail: fname(h.field_id) + ' 収穫' + h.date + ' の ' + gap + '日前に散布（要 ' + p.preharvest_days + '日以上）',
+            cause: '収穫前日数を空けずに農薬を使用（散布日/収穫日の入力ミス、または実際の違反）。',
+            fix: '日付の誤りが無いか確認。実際に違反ならロットの出荷可否を要判断。',
+            refs: [{ kind: e.src.kind, id: e.src.id, label: '散布 ' + e.date }, { kind: 'harvest', id: h.id, label: '収穫 ' + h.date }],
+          })
+        }
+      })
+    })
+  })
+
+  // H1 出荷が収穫を超過（ストック残マイナス）。出荷記録は品種(variety)単位で集計されるため品種キーで突合。
+  run(() => {
+    const harv = {}, ship = {}
+    harvests.forEach(h => { const k = h.variety || ('圃場#' + h.field_id); harv[k] = (harv[k] || 0) + (Number(h.total_cases) || 0) })
+    shipments.forEach(s => { const k = s.variety || ('圃場#' + s.field_id); const c = Number(s.cases != null ? s.cases : s.total_cases) || 0; ship[k] = (ship[k] || 0) + c })
+    Object.keys(ship).forEach(k => {
+      if ((ship[k] || 0) > (harv[k] || 0) + 0.001) push({
+        severity: 'high', category: '出荷', title: '出荷が収穫を超過（ストック残マイナス）',
+        detail: k + '：収穫 ' + (harv[k] || 0) + 'ケース < 出荷 ' + ship[k] + 'ケース',
+        cause: '収穫より多く出荷が登録されている（出荷ケース数の入力ミス、または収穫記録漏れ）。',
+        fix: '収穫記録の漏れ、または出荷数の誤りを確認して訂正。',
+      })
+    })
+  })
+
+  // M1 記録の畝がロットに紐づかない（圃場/畝の選び間違い）
+  run(() => {
+    const checkRow = (r, kind, label) => {
+      const lots = lotsMap[r.field_id] || []
+      if (!r.row_range || lots.length === 0) return
+      const rset = rowset(r.row_range); if (rset.size === 0) return
+      const overlap = lots.some(l => { const lset = rowset(l.row_range); return [...rset].some(n => lset.has(n)) })
+      if (!overlap) push({
+        severity: 'mid', category: '突合', title: label + 'の畝がロットに一致しない',
+        detail: fname(r.field_id) + ' ' + r.date + ' 畝' + r.row_range + ' は登録ロットの畝範囲外',
+        cause: '圃場や畝範囲の選び間違いの可能性（別圃場の記録が紛れている等）。',
+        fix: '記録の圃場・畝範囲、またはロット登録を確認して合わせる。',
+        refs: [{ kind, id: r.id, label: r.date }],
+      })
+    }
+    sprays.forEach(r => checkRow(r, 'spray', '農薬散布'))
+    ferts.forEach(r => checkRow(r, 'fert', '施肥'))
+    harvests.forEach(r => checkRow(r, 'harvest', '収穫'))
+  })
+
+  // M2 未来日付の記録（作業日の打ち間違い）
+  run(() => {
+    const all = [
+      ...records.map(r => ({ r, kind: 'record', wt: r.work_type })),
+      ...sprays.map(r => ({ r, kind: 'spray', wt: '農薬散布' })),
+      ...ferts.map(r => ({ r, kind: 'fert', wt: '施肥' })),
+      ...harvests.map(r => ({ r, kind: 'harvest', wt: '収穫' })),
+    ]
+    all.forEach(({ r, kind, wt }) => { if (r.date && r.date > today) push({
+      severity: 'mid', category: '日付', title: '未来日付の記録',
+      detail: fname(r.field_id) + ' ' + wt + ' が ' + r.date + '（今日 ' + today + ' より先）',
+      cause: '作業日の打ち間違いの可能性。', fix: '正しい作業日に訂正。',
+      refs: [{ kind, id: r.id, label: r.date }],
+    }) })
+  })
+
+  // M3 農薬の使用が仕入を超過（在庫マイナス・保守的に仕入総量で判定）
+  run(() => {
+    const purchased = {}; (ctx.pesticidePurchases || []).forEach(p => { purchased[p.pesticide_id] = (purchased[p.pesticide_id] || 0) + (Number(p.amount_L) || 0) })
+    const used = {}
+    sprays.forEach(r => (r.pesticides || []).forEach(pi => { const dil = Number(pi.dilution) || 0, vol = Number(r.spray_volume_L) || 0; if (dil > 0 && vol > 0) used[pi.pesticide_id] = (used[pi.pesticide_id] || 0) + vol / dil }))
+    Object.keys(used).forEach(pid => {
+      const avail = purchased[pid] || 0
+      if (avail > 0 && used[pid] > avail + 0.001) { const p = pById(Number(pid)); push({
+        severity: 'mid', category: '在庫', title: (p ? p.name : '農薬#' + pid) + ' の使用が仕入を超過',
+        detail: '使用推定 ' + used[pid].toFixed(2) + 'L > 仕入 ' + avail + 'L',
+        cause: '仕入記録の漏れ、または散布液量/希釈の入力ミス。',
+        fix: '仕入記録の追加、または散布記録の数値を確認。',
+      }) }
+    })
+  })
+
+  // L1 重複入力の疑い（基本日報）
+  run(() => {
+    const seen = {}
+    records.forEach(r => { const k = [r.field_id, r.date, r.work_type, r.row_range || ''].join('|'); (seen[k] = seen[k] || []).push(r) })
+    Object.values(seen).forEach(arr => { if (arr.length > 1) push({
+      severity: 'low', category: '重複', title: '同じ内容の日報が重複',
+      detail: fname(arr[0].field_id) + ' ' + arr[0].date + ' ' + arr[0].work_type + ' が ' + arr.length + '件',
+      cause: '二重登録の可能性（保存ボタンの押し過ぎ等）。', fix: '重複ぶんを削除。',
+      refs: arr.map(r => ({ kind: 'record', id: r.id, label: r.date })),
+    }) })
+  })
+
+  // L2 作業者名が未記入（GAPでは作業者の記録が必要）
+  run(() => {
+    const missing = records.filter(r => !r.worker || !String(r.worker).trim())
+    if (missing.length > 0) push({
+      severity: 'low', category: '記入', title: '作業者名が未記入の日報',
+      detail: missing.length + '件で作業者が空欄',
+      cause: '入力時に作業者名を入れ忘れ。', fix: '各記録に作業者名を追記。',
+      refs: missing.slice(0, 20).map(r => ({ kind: 'record', id: r.id, label: r.date })),
+    })
+  })
+
+  const order = { high: 0, mid: 1, low: 2 }
+  findings.sort((a, b) => order[a.severity] - order[b.severity])
+  return findings
+}
+
 const INITIAL_RENTALS = []
 // ===== 今日のタスクモックデータ =====
 // 「今日 どの畑で 誰が 何をする」を一目で把握するためのデータ

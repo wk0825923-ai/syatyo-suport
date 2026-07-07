@@ -20,6 +20,7 @@ const NAV_SECTIONS_DATA = [
   { id:'crop_plan',        label:'作付計画 / 経営予測', icon:'calendar-event' },  // 季節ごと
   { id:'export',           label:'GAP帳票出力',         icon:'file-export'    },  // 監査時
   { id:'gap',              label:'GAPチェックリスト',   icon:'checklist'      },  // 監査時
+  { id:'integrity_check',  label:'整合性チェック',      icon:'checkup-list'   },  // 突合せ: 入力ミス/食い違いを点検
 ]
 // マスタ・設定系をまとめる（見出しは「管理・設定」・既定で折りたたみ）。初期設定中心で頻度は低い。
 // 農薬/肥料/作物カテゴリは「マスタ管理」1つに、機器予約と機械整備記録は「機器管理」1つにタブ統合。
@@ -460,6 +461,79 @@ function Sidebar({ current, onChange, fields, onAddField, onDeleteField, current
         style:{ display:'flex', alignItems:'center', gap:6, background:'none', border:'1px solid #DDE8DE', borderRadius:6, padding:'6px 10px', fontSize:12, color:'#64748B', cursor:'pointer', width:'100%' }
       }, React.createElement('i', { className:'ti ti-logout', style:{ fontSize:14 } }), 'ログアウト')
     )
+  )
+}
+
+// =====================================================
+// INTEGRITY-01: 整合性チェック（突合せ）ページ
+// 記録同士の食い違い・人的入力ミスを横断で洗い出し、原因と対処を示す。
+// runFarmIntegrityChecks(data.js) の結果を深刻度別に表示。日報管理へ飛べる導線付き。
+// =====================================================
+const SEV_META = {
+  high: { label:'要対応', color:'#DC2626', bg:'#FEF2F2', border:'#FCA5A5', icon:'alert-triangle' },
+  mid:  { label:'要確認', color:'#B45309', bg:'#FFFBEB', border:'#FDE68A', icon:'alert-circle' },
+  low:  { label:'参考',   color:'#0369A1', bg:'#F0F9FF', border:'#BAE6FD', icon:'info-circle' },
+}
+function FarmIntegrityPage(props) {
+  const findings = React.useMemo(() => {
+    try { return runFarmIntegrityChecks(props) } catch (e) { return [] }
+  }, [props.records, props.lotSprayRecords, props.topDressingRecords, props.harvestRecords, props.shipmentRecords, props.farmLots, props.fields, props.pesticides, props.pesticidePurchases])
+  const counts = { high:0, mid:0, low:0 }
+  findings.forEach(f => { counts[f.severity] = (counts[f.severity] || 0) + 1 })
+  const onNavigate = props.onNavigate
+
+  return React.createElement('div', { className:'page' },
+    React.createElement('div', { className:'eyebrow' }, 'RECONCILIATION'),
+    React.createElement('div', { className:'page-title' }, '整合性チェック（突合せ）'),
+    React.createElement('div', { className:'page-sub' }, '記録の食い違い・入力ミスを横断で点検し、原因と直し方を表示します'),
+
+    // サマリー
+    React.createElement('div', { style:{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 } },
+      ...['high','mid','low'].map(sev => {
+        const m = SEV_META[sev]
+        return React.createElement('div', { key:sev, style:{ flex:'1 1 140px', background:m.bg, border:'1px solid '+m.border, borderRadius:12, padding:'14px 16px' } },
+          React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:6, color:m.color, fontWeight:700, fontSize:13 } },
+            React.createElement('i', { className:'ti ti-'+m.icon, style:{ fontSize:16 } }), m.label),
+          React.createElement('div', { style:{ fontSize:26, fontWeight:800, color:m.color, fontVariantNumeric:'tabular-nums' } }, counts[sev]),
+          React.createElement('div', { style:{ fontSize:11, color:'#6B7280' } }, '件')
+        )
+      })
+    ),
+
+    findings.length === 0
+      ? React.createElement('div', { style:{ background:'#ECFDF5', border:'1px solid #A7F3D0', borderRadius:14, padding:'32px 20px', textAlign:'center' } },
+          React.createElement('div', { style:{ fontSize:40, marginBottom:8 } }, '✅'),
+          React.createElement('div', { style:{ fontSize:16, fontWeight:800, color:'#065F46', marginBottom:4 } }, '食い違いは見つかりませんでした'),
+          React.createElement('div', { style:{ fontSize:13, color:'#4B5563' } }, '記録同士の突合せで、要対応の不整合はありません。')
+        )
+      : React.createElement('div', { style:{ display:'flex', flexDirection:'column', gap:12 } },
+          ...findings.map(f => {
+            const m = SEV_META[f.severity] || SEV_META.low
+            return React.createElement('div', { key:f.id, style:{ background:'#fff', border:'1px solid #E5E7EB', borderLeft:'4px solid '+m.color, borderRadius:12, padding:'14px 16px' } },
+              React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:6 } },
+                React.createElement('span', { style:{ fontSize:11, fontWeight:700, color:m.color, background:m.bg, border:'1px solid '+m.border, borderRadius:999, padding:'2px 8px' } }, m.label),
+                React.createElement('span', { style:{ fontSize:11, fontWeight:600, color:'#6B7280', background:'#F3F4F6', borderRadius:999, padding:'2px 8px' } }, f.category),
+                React.createElement('span', { style:{ fontSize:14, fontWeight:700, color:'#111827' } }, f.title)
+              ),
+              React.createElement('div', { style:{ fontSize:13, color:'#374151', marginBottom:6 } }, f.detail),
+              React.createElement('div', { style:{ display:'flex', gap:8, alignItems:'flex-start', marginBottom:4 } },
+                React.createElement('span', { style:{ fontSize:11, fontWeight:700, color:'#92400E', flexShrink:0 } }, '原因'),
+                React.createElement('span', { style:{ fontSize:12, color:'#6B7280' } }, f.cause)
+              ),
+              React.createElement('div', { style:{ display:'flex', gap:8, alignItems:'flex-start' } },
+                React.createElement('span', { style:{ fontSize:11, fontWeight:700, color:'#065F46', flexShrink:0 } }, '対処'),
+                React.createElement('span', { style:{ fontSize:12, color:'#374151' } }, f.fix)
+              ),
+              (f.refs && f.refs.length > 0) && React.createElement('div', { style:{ marginTop:8, display:'flex', gap:6, flexWrap:'wrap', alignItems:'center' } },
+                React.createElement('span', { style:{ fontSize:11, color:'#9CA3AF' } }, '該当:'),
+                ...f.refs.slice(0, 8).map((rf, i) => React.createElement('span', { key:i, style:{ fontSize:11, color:'#4B5563', background:'#F3F4F6', borderRadius:6, padding:'2px 7px' } }, rf.label || (rf.kind + '#' + rf.id))),
+                f.refs.length > 8 && React.createElement('span', { style:{ fontSize:11, color:'#9CA3AF' } }, '他' + (f.refs.length - 8) + '件'),
+                onNavigate && React.createElement('button', { onClick:()=>onNavigate('record_list'),
+                  style:{ marginLeft:'auto', fontSize:11, fontWeight:700, color:'#0A6B52', background:'#F0F8F4', border:'1px solid #C6DDD0', borderRadius:8, padding:'4px 10px', cursor:'pointer' } }, '日報管理で直す →')
+              )
+            )
+          })
+        )
   )
 }
 
@@ -2306,6 +2380,10 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
   const _maintPending = _maint.filter(m => m.result === '要対応')
   const _maintLast = _maint.map(m => m.date).filter(Boolean).sort().slice(-1)[0] || null
   const _maintOverdue = !_maintLast || (Math.round((Date.now() - new Date(_maintLast)) / 86400000) > 60)
+  // 整合性チェック（突合せ）: 記録の食い違い・入力ミスの要対応/要確認件数をダッシュボードで気づけるように
+  const _integrity = (() => { try { return runFarmIntegrityChecks(Object.assign({}, gapCtx, { fields })) } catch (e) { return [] } })()
+  const _integHigh = _integrity.filter(f => f.severity === 'high').length
+  const _integMid  = _integrity.filter(f => f.severity === 'mid').length
   // --- 集計 ---
   const gapPct     = gap.length > 0 ? Math.round(gap.filter(c => c.is_cleared || isGapAutoCleared(c, gapCtx)).length / gap.length * 100) : 0
   const harvestRisks = calcHarvestRisk(records, cropPlans || [], pesticides || [], fields)
@@ -2406,6 +2484,22 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
       React.createElement('div', { style:{ fontSize:'12px', color:'#6B7280', background:'#F8FAFF', border:'1px solid #E5E9F0', borderRadius:'6px', padding:'6px 10px' } },
         '🌱 農場名 管理システム'
       )
+    ),
+
+    // --- 整合性チェック（突合せ）アラート: 記録の食い違い・入力ミスに気づけるように ---
+    (_integHigh + _integMid) > 0 && React.createElement('div', {
+      style:{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap',
+        background: _integHigh > 0 ? '#FEF2F2' : '#FFFBEB', border:'1px solid ' + (_integHigh > 0 ? '#FCA5A5' : '#FDE68A'),
+        borderRadius:12, padding:'12px 16px', marginBottom:20 }
+    },
+      React.createElement('i', { className:'ti ti-' + (_integHigh > 0 ? 'alert-triangle' : 'alert-circle'), style:{ fontSize:20, color: _integHigh > 0 ? '#DC2626' : '#B45309', flexShrink:0 } }),
+      React.createElement('div', { style:{ flex:1, minWidth:0 } },
+        React.createElement('div', { style:{ fontSize:14, fontWeight:700, color:'#111827' } }, '記録の食い違いが見つかりました'),
+        React.createElement('div', { style:{ fontSize:12, color:'#6B7280' } },
+          (_integHigh > 0 ? ('要対応 ' + _integHigh + '件') : '') + (_integHigh > 0 && _integMid > 0 ? ' ／ ' : '') + (_integMid > 0 ? ('要確認 ' + _integMid + '件') : '') + ' — 突合せで原因と直し方を確認できます')
+      ),
+      React.createElement('button', { onClick:()=>onNavigate && onNavigate('integrity_check'),
+        style:{ flexShrink:0, background:'#0A6B52', color:'#fff', border:'none', borderRadius:8, padding:'8px 14px', fontSize:13, fontWeight:700, cursor:'pointer' } }, '整合性チェックを開く →')
     ),
 
     // --- 統計カード 4枚（先月比付き） ---
