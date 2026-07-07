@@ -815,6 +815,139 @@ function runFarmIntegrityChecks(ctx) {
     })
   })
 
+  // ===== 拡充チェック（数値の打ち間違い / 日付順序矛盾 / 記入漏れ / 二重計上）=====
+  // ロットの定植（無ければ播種）日を、記録の畝範囲に重なるロットから引くヘルパー
+  const plantDateFor = (fid, rowStr) => {
+    const lots = lotsMap[fid] || []; if (lots.length === 0) return null
+    const rset = rowStr ? rowset(rowStr) : null
+    const match = lots.find(l => { if (!rset) return true; const lset = rowset(l.row_range); return [...rset].some(n => lset.has(n)) })
+    return match ? (match.transplant_date || match.seed_date || null) : null
+  }
+
+  // N1 農薬の希釈倍率が規定と大きく違う（桁間違い等）
+  run(() => {
+    sprays.forEach(r => (r.pesticides || []).forEach(pi => {
+      const p = pById(pi.pesticide_id); const md = p && Number(p.dilution); const rd = Number(pi.dilution)
+      if (md > 0 && rd > 0) { const ratio = rd / md; if (ratio >= 5 || ratio <= 0.2) push({
+        severity: 'mid', category: '数値', title: (p ? p.name : '農薬') + ' の希釈倍率が規定と大きく違う',
+        detail: fname(r.field_id) + ' ' + r.date + '：記録 ' + rd + '倍 / 規定 ' + md + '倍',
+        cause: '希釈倍率の桁間違い等の入力ミスの可能性（薬害・残留リスク）。',
+        fix: '散布記録の希釈倍率を確認して訂正。',
+        refs: [{ kind: 'spray', id: r.id, label: r.date }],
+      }) }
+    }))
+  })
+
+  // N2 数量が0以下（収穫・出荷ケース数）
+  run(() => {
+    harvests.forEach(h => { if (Number(h.total_cases) <= 0) push({
+      severity: 'mid', category: '数値', title: '収穫ケース数が0以下',
+      detail: fname(h.field_id) + ' ' + h.date + '：' + h.total_cases + 'ケース',
+      cause: 'ケース数の入力漏れ/誤り。', fix: '正しいケース数に訂正。',
+      refs: [{ kind: 'harvest', id: h.id, label: h.date }],
+    }) })
+    shipments.forEach(s => { if (Number(s.cases) <= 0) push({
+      severity: 'mid', category: '数値', title: '出荷ケース数が0以下',
+      detail: (s.variety || fname(s.field_id)) + ' ' + s.date + '：' + s.cases + 'ケース',
+      cause: '出荷数の入力漏れ/誤り。', fix: '正しい出荷数に訂正。',
+    }) })
+  })
+
+  // N3 散布液量が未入力/0（在庫計算に影響）
+  run(() => {
+    const bad = sprays.filter(r => (r.pesticides || []).length > 0 && !(Number(r.spray_volume_L) > 0))
+    if (bad.length > 0) push({
+      severity: 'low', category: '数値', title: '散布液量が未入力/0の農薬散布',
+      detail: bad.length + '件（在庫の減算計算に影響）',
+      cause: '散布液量の入力漏れ。', fix: '各散布記録に散布液量(L)を入力。',
+      refs: bad.slice(0, 20).map(r => ({ kind: 'spray', id: r.id, label: r.date })),
+    })
+  })
+
+  // D1 収穫日が定植日より前（時系列の矛盾・重大）
+  run(() => {
+    harvests.forEach(h => {
+      const plant = plantDateFor(h.field_id, h.row_range)
+      if (plant && h.date && h.date < plant) push({
+        severity: 'high', category: '日付順序', title: '収穫日が定植日より前',
+        detail: fname(h.field_id) + '：収穫 ' + h.date + ' < 定植 ' + plant,
+        cause: '収穫日または定植日の入力ミス（時系列の矛盾）。',
+        fix: '日付を確認して訂正。',
+        refs: [{ kind: 'harvest', id: h.id, label: h.date }],
+      })
+    })
+  })
+
+  // D2 散布/施肥が定植日より前（畝がロットに重なる場合のみ）
+  run(() => {
+    const chk = (r, kind, label) => {
+      const plant = plantDateFor(r.field_id, r.row_range)
+      if (plant && r.date && r.date < plant) push({
+        severity: 'mid', category: '日付順序', title: label + 'が定植日より前',
+        detail: fname(r.field_id) + '：' + label + ' ' + r.date + ' < 定植 ' + plant,
+        cause: '作業日または定植日の入力ミス。', fix: '日付を確認して訂正。',
+        refs: [{ kind, id: r.id, label: r.date }],
+      })
+    }
+    sprays.forEach(r => chk(r, 'spray', '散布'))
+    ferts.forEach(r => chk(r, 'fert', '施肥'))
+  })
+
+  // R2 天気が未記入の農薬散布（GAP・ドリフト管理で必要）
+  run(() => {
+    const nw = sprays.filter(r => !r.weather || !String(r.weather).trim())
+    if (nw.length > 0) push({
+      severity: 'low', category: '記入', title: '天気が未記入の農薬散布',
+      detail: nw.length + '件',
+      cause: '天気の入力漏れ。', fix: '各散布記録に天気を追記。',
+      refs: nw.slice(0, 20).map(r => ({ kind: 'spray', id: r.id, label: r.date })),
+    })
+  })
+
+  // R3 品種が未記入の収穫（トレーサビリティに必要）
+  run(() => {
+    const nv = harvests.filter(h => !h.variety || !String(h.variety).trim())
+    if (nv.length > 0) push({
+      severity: 'low', category: '記入', title: '品種が未記入の収穫',
+      detail: nv.length + '件',
+      cause: '品種の入力漏れ。', fix: '各収穫記録に品種を追記。',
+      refs: nv.slice(0, 20).map(h => ({ kind: 'harvest', id: h.id, label: h.date })),
+    })
+  })
+
+  // DUP2 農薬散布/施肥/収穫の重複疑い
+  run(() => {
+    const dupBy = (arr, keyFn, kind, label) => {
+      const seen = {}
+      arr.forEach(r => { const k = keyFn(r); (seen[k] = seen[k] || []).push(r) })
+      Object.values(seen).forEach(a => { if (a.length > 1) push({
+        severity: 'low', category: '重複', title: label + 'の重複疑い',
+        detail: fname(a[0].field_id) + ' ' + a[0].date + (a[0].row_range ? (' 畝' + a[0].row_range) : '') + ' が ' + a.length + '件',
+        cause: '二重登録の可能性。', fix: '重複ぶんを削除。',
+        refs: a.map(r => ({ kind, id: r.id, label: r.date })),
+      }) })
+    }
+    dupBy(sprays, r => [r.field_id, r.date, r.row_range || '', (r.pesticides || []).map(p => p.pesticide_id).sort().join(',')].join('|'), 'spray', '農薬散布')
+    dupBy(ferts, r => [r.field_id, r.date, r.row_range || ''].join('|'), 'fert', '施肥')
+    dupBy(harvests, r => [r.field_id, r.date, r.row_range || '', r.variety || ''].join('|'), 'harvest', '収穫')
+  })
+
+  // OVL1 同じ畝に「栽培中/収穫待ち」ロットが重複（収穫の二重計上の温床）
+  run(() => {
+    Object.entries(lotsMap).forEach(([fid, lots]) => {
+      const act = (lots || []).filter(l => l.status === 'growing' || l.status === 'ready')
+      for (let i = 0; i < act.length; i++) for (let j = i + 1; j < act.length; j++) {
+        const a = rowset(act[i].row_range), b = rowset(act[j].row_range)
+        if ([...a].some(n => b.has(n))) push({
+          severity: 'mid', category: 'ロット重複', title: '同じ畝に栽培中ロットが重複',
+          detail: fname(Number(fid)) + ' 畝 ' + act[i].row_range + ' と ' + act[j].row_range + ' が重複',
+          cause: '旧作の終了処理漏れ、または畝範囲の入力ミス（収穫が二重に集計される温床）。',
+          fix: '古いロットを収穫済/終了にするか、畝範囲を修正。',
+        })
+      }
+    })
+  })
+
   const order = { high: 0, mid: 1, low: 2 }
   findings.sort((a, b) => order[a.severity] - order[b.severity])
   return findings
