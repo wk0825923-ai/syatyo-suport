@@ -11799,8 +11799,8 @@ async function exportTraineeDiaryPDF(staffMember, monthLabel, diaryRows, summary
       </div>
 
       <div style="display:flex;gap:10px;border:1px solid #ccc;border-radius:6px;padding:10px 14px;margin-bottom:14px;background:#F8FAF8">
-        <div style="flex:1"><div style="font-size:9px;color:#777">実習生</div><div style="font-size:13px;font-weight:700">${staffMember.name}</div></div>
-        <div style="flex:1"><div style="font-size:9px;color:#777">国籍</div><div style="font-size:13px;font-weight:700">${natLabel[staffMember.nationality] || staffMember.nationality}</div></div>
+        <div style="flex:1"><div style="font-size:9px;color:#777">実習生</div><div style="font-size:13px;font-weight:700">${escHtml(staffMember.name)}</div></div>
+        <div style="flex:1"><div style="font-size:9px;color:#777">国籍</div><div style="font-size:13px;font-weight:700">${escHtml(natLabel[staffMember.nationality] || staffMember.nationality)}</div></div>
         <div style="flex:1"><div style="font-size:9px;color:#777">記録日数</div><div style="font-size:13px;font-weight:700">${summary.count}日</div></div>
         <div style="flex:1"><div style="font-size:9px;color:#777">実働時間合計</div><div style="font-size:13px;font-weight:700">${summary.totalHours}h${summary.totalMins ? summary.totalMins+'m' : ''}</div></div>
       </div>
@@ -11835,8 +11835,8 @@ async function exportTraineeDiaryPDF(staffMember, monthLabel, diaryRows, summary
                   <td style="padding:5px 7px;border:1px solid #ddd;text-align:center;color:${wday==='日'?'#DC2626':wday==='土'?'#1D4ED8':'#555'}">${wday}</td>
                   <td style="padding:5px 7px;border:1px solid #ddd;text-align:center">${d.start_time}〜${d.end_time}</td>
                   <td style="padding:5px 7px;border:1px solid #ddd;text-align:center">${hh}h${mm?mm+'m':''}</td>
-                  <td style="padding:5px 7px;border:1px solid #ddd;white-space:pre-wrap">${(d.tasks||'').replace(/</g,'&lt;')}</td>
-                  <td style="padding:5px 7px;border:1px solid #ddd;text-align:center">${d.supervisor||'—'}</td>
+                  <td style="padding:5px 7px;border:1px solid #ddd;white-space:pre-wrap">${escHtml(d.tasks)}</td>
+                  <td style="padding:5px 7px;border:1px solid #ddd;text-align:center">${d.supervisor ? escHtml(d.supervisor) : '—'}</td>
                 </tr>`
               }).join('')
           }
@@ -12943,23 +12943,23 @@ async function exportCropPlanPDF(plans, fields) {
           ${rows.flatMap(({field, plans}) => {
             if (plans.length === 0) {
               return [`<tr>
-                <td style="padding:6px 10px;border:1px solid #ddd">${field.name}</td>
+                <td style="padding:6px 10px;border:1px solid #ddd">${escHtml(field.name)}</td>
                 <td style="padding:6px 10px;border:1px solid #ddd;color:#aaa">—</td>
                 ${MONTHS.map(()=>`<td style="border:1px solid #ddd"></td>`).join('')}
                 <td style="border:1px solid #ddd"></td>
               </tr>`]
             }
             return plans.map((plan, pi) => `<tr style="${pi%2===1?'background:#f9f9f9':''}">
-              <td style="padding:6px 10px;border:1px solid #ddd">${pi===0 ? field.name : ''}</td>
-              <td style="padding:6px 10px;border:1px solid #ddd;font-weight:500">${plan.crop}</td>
+              <td style="padding:6px 10px;border:1px solid #ddd">${pi===0 ? escHtml(field.name) : ''}</td>
+              <td style="padding:6px 10px;border:1px solid #ddd;font-weight:500">${escHtml(plan.crop)}</td>
               ${MONTHS.map((_,i) => {
                 const m = i + 1
                 const inRange = m >= plan.start_month && m <= plan.end_month
                 return `<td style="border:1px solid #ddd;padding:3px;text-align:center">
-                  ${inRange ? `<div style="background:${plan.color};border-radius:3px;height:18px;font-size:9px;line-height:18px;color:#fff;font-weight:600">${m===plan.start_month?plan.crop:''}</div>` : ''}
+                  ${inRange ? `<div style="background:${escHtml(plan.color)};border-radius:3px;height:18px;font-size:9px;line-height:18px;color:#fff;font-weight:600">${m===plan.start_month?escHtml(plan.crop):''}</div>` : ''}
                 </td>`
               }).join('')}
-              <td style="padding:6px 10px;border:1px solid #ddd;font-size:10px;color:#555">${plan.note||''}</td>
+              <td style="padding:6px 10px;border:1px solid #ddd;font-size:10px;color:#555">${escHtml(plan.note)}</td>
             </tr>`)
           }).join('')}
         </tbody>

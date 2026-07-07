@@ -14,6 +14,14 @@ function todayYmd(d) {
   return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0')
 }
 
+// PDF/印刷用HTMLに差し込むユーザー入力(圃場名/作業者名/品種/備考など)のエスケープ。
+// これらは el.innerHTML や window.open+document.write に渡すため、<img onerror=...> 等が
+// そのまま実行される。テンプレートリテラルに埋める前に必ず通す。
+function escHtml(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+
 const CONFIG = {
   FARM_NAME:     '農場名',
   JGAP_CERT_NO:  'JGAP-XXXX-XXXXX',
@@ -279,17 +287,17 @@ function buildSprayTableHTML(sprayRecords, fields, pesticides) {
         const disposal = Number(r.disposal_amount) || 0
         return `<tr>
           <td>${i + 1}</td>
-          <td>${r.date}</td>
-          <td>${field ? field.name : '—'}</td>
-          <td>${field ? field.crop : '—'}</td>
-          <td style="text-align:left">${pest  ? pest.name  : '—'}</td>
-          <td>${pest  ? pest.reg_no : '—'}</td>
-          <td>${r.dilution ? r.dilution + '倍' : '—'}</td>
+          <td>${escHtml(r.date)}</td>
+          <td>${field ? escHtml(field.name) : '—'}</td>
+          <td>${field ? escHtml(field.crop) : '—'}</td>
+          <td style="text-align:left">${pest  ? escHtml(pest.name)  : '—'}</td>
+          <td>${pest  ? escHtml(pest.reg_no) : '—'}</td>
+          <td>${r.dilution ? escHtml(r.dilution) + '倍' : '—'}</td>
           <td>${r.amount || '—'}</td>
           <td>${disposal > 0 ? disposal + 'L' : '—'}</td>
-          <td>${r.weather || '—'}</td>
-          <td>${r.worker || '—'}</td>
-          <td>${pest ? pest.preharvest_days + '日' : '—'}</td>
+          <td>${r.weather ? escHtml(r.weather) : '—'}</td>
+          <td>${r.worker ? escHtml(r.worker) : '—'}</td>
+          <td>${pest ? escHtml(pest.preharvest_days) + '日' : '—'}</td>
         </tr>`
       }).join('')
   const emptyRows = [1,2,3].map(() =>
@@ -312,11 +320,11 @@ function buildSprayTableHTML(sprayRecords, fields, pesticides) {
       <div class="pdf-doc-header-body">
         <div class="pdf-doc-field">
           <div class="pdf-doc-field-label">農業者名称 / Organization</div>
-          <div class="pdf-doc-field-value">${CONFIG.FARM_NAME}</div>
+          <div class="pdf-doc-field-value">${escHtml(CONFIG.FARM_NAME)}</div>
         </div>
         <div class="pdf-doc-field">
           <div class="pdf-doc-field-label">JGAP認証番号 / Certificate No.</div>
-          <div class="pdf-doc-field-value" style="letter-spacing:.05em">${CONFIG.JGAP_CERT_NO}</div>
+          <div class="pdf-doc-field-value" style="letter-spacing:.05em">${escHtml(CONFIG.JGAP_CERT_NO)}</div>
         </div>
         <div class="pdf-doc-field">
           <div class="pdf-doc-field-label">出力日 / Issued Date &nbsp;｜&nbsp; 対象件数</div>
