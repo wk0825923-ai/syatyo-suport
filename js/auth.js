@@ -156,7 +156,12 @@ function Root() {
       const farm = farms.find(f => f.id === savedId) || farms[0]
       setCurrentFarm(farm)
       setAuthStatus('ready')
-    } catch(err) { console.error('tenant ctx:', err); setAuthStatus('unauthenticated') }
+    } catch(err) {
+      // 通信不調などで農場情報が読めない時、黙ってログイン画面に戻すと原因が分からない。
+      console.error('tenant ctx:', err)
+      try { if (typeof showToast === 'function') showToast('農場情報の読み込みに失敗しました。通信環境を確認して、ログインし直してください。', 'error') } catch (_) {}
+      setAuthStatus('unauthenticated')
+    }
   }, [])
   React.useEffect(() => {
     sb.auth.getSession().then(({ data:{ session } }) => {
