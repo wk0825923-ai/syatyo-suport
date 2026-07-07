@@ -13,6 +13,15 @@
       document.body.appendChild(s)
     }
   }, [])
+  // 【まっさら表示】?reset で現在ブラウザの農場ローカルデータ(farm_*)を消去して空状態に。
+  // デモの逆。ログイン状態(sb-*)は保持。消去後はクリーンURLへ遷移してリロード。
+  React.useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('reset') && !window.__farmReset) {
+      window.__farmReset = true
+      try { Object.keys(localStorage).filter(k => k.indexOf('farm_') === 0).forEach(k => localStorage.removeItem(k)) } catch (e) {}
+      window.location.replace(window.location.pathname)
+    }
+  }, [])
   const [page,      setPage]     = React.useState('dashboard')
   const [fields,    setFields]   = useFPS('farm_fields_v2',     INITIAL_FIELDS)
   const [cropCycles, setCropCycles] = useFPS('farm_crop_cycles', INITIAL_CROP_CYCLES)
