@@ -160,7 +160,9 @@ function _readFieldNoOverrides() {
   } catch { return {} }
 }
 function _writeFieldNoOverrides(next) {
-  try { localStorage.setItem(_fieldNoOverrideKey(), JSON.stringify(next)) } catch {}
+  // 保存失敗(多くは容量超過)を黙って握り潰すと登録が消えたのに気づけない。usePersistStateと同様に可視化。
+  try { localStorage.setItem(_fieldNoOverrideKey(), JSON.stringify(next)) }
+  catch (e) { try { if (typeof showToast === 'function') showToast('圃場番号の登録を保存できませんでした（ブラウザの空き容量不足の可能性）。', 'error') } catch (_) {} }
   _fieldNoOverrideListeners.forEach(fn => fn(next))
 }
 // 圃場選択UIから呼び出す共通フック。登録すると同じページを開いている他のUIにも即反映される。
