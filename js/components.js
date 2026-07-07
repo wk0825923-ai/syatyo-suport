@@ -2380,8 +2380,11 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
   const _maintPending = _maint.filter(m => m.result === '要対応')
   const _maintLast = _maint.map(m => m.date).filter(Boolean).sort().slice(-1)[0] || null
   const _maintOverdue = !_maintLast || (Math.round((Date.now() - new Date(_maintLast)) / 86400000) > 60)
-  // 整合性チェック（突合せ）: 記録の食い違い・入力ミスの要対応/要確認件数をダッシュボードで気づけるように
-  const _integrity = (() => { try { return runFarmIntegrityChecks(Object.assign({}, gapCtx, { fields })) } catch (e) { return [] } })()
+  // 整合性チェック（突合せ）: 記録の食い違い・入力ミスの要対応/要確認件数をダッシュボードで気づけるように。
+  // データが年々増えても毎レンダーで再計算しないようメモ化（gapCtx内の配列参照は状態更新時のみ変化）。
+  const _integrity = React.useMemo(() => {
+    try { return runFarmIntegrityChecks(Object.assign({}, gapCtx, { fields })) } catch (e) { return [] }
+  }, [gapCtx.records, gapCtx.lotSprayRecords, gapCtx.topDressingRecords, gapCtx.harvestRecords, gapCtx.shipmentRecords, gapCtx.farmLots, fields, gapCtx.pesticides, gapCtx.pesticidePurchases])
   const _integHigh = _integrity.filter(f => f.severity === 'high').length
   const _integMid  = _integrity.filter(f => f.severity === 'mid').length
   // --- 集計 ---
