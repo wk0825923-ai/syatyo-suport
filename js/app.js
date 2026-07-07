@@ -1,5 +1,8 @@
 ﻿function App({ currentOrg, currentFarm, availableFarms, authUser, onFarmChange, onSignOut }) {
   const farmKey = currentFarm.id
+  // 圃場番号の手動上書き(farm_field_no_overrides)は data.js のモジュール関数で扱うため、
+  // 現在の農場IDを CONFIG 経由で渡してキーを農場ごとにスコープする（法人の農場間で漏らさない）。
+  CONFIG.CURRENT_FARM_ID = farmKey
   CONFIG.FARM_NAME    = currentOrg.type === 'corp' ? currentOrg.name + ' / ' + currentFarm.name : (currentFarm.name || currentOrg.name)
   CONFIG.JGAP_CERT_NO = currentFarm.jgap_cert_no || currentOrg.jgap_cert_no || 'JGAP-XXXX-XXXXX'
   const useFPS = (k, i) => usePersistState(k + '_' + farmKey, i)

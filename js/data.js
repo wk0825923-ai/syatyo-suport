@@ -144,11 +144,23 @@ const FIELD_NO_NORMALIZE = {}
 // =====================================================
 const FIELD_NO_OVERRIDE_KEY = 'farm_field_no_overrides_v1'
 const _fieldNoOverrideListeners = new Set()
+// 上書きマップは fieldId を指すため、農場をまたいで共有すると法人の農場間で
+// 圃場番号が誤マッチする。他の記録と同じく農場IDでスコープする。
+function _fieldNoOverrideKey() {
+  const fid = (typeof CONFIG !== 'undefined' && CONFIG.CURRENT_FARM_ID) ? CONFIG.CURRENT_FARM_ID : ''
+  return fid ? FIELD_NO_OVERRIDE_KEY + '_' + fid : FIELD_NO_OVERRIDE_KEY
+}
 function _readFieldNoOverrides() {
-  try { return JSON.parse(localStorage.getItem(FIELD_NO_OVERRIDE_KEY) || '{}') } catch { return {} }
+  try {
+    const raw = localStorage.getItem(_fieldNoOverrideKey())
+    if (raw != null) return JSON.parse(raw)
+    // 旧・農場非スコープキーからの読み取りフォールバック（既存の登録を失わない。書込は必ずスコープ側へ）
+    const legacy = localStorage.getItem(FIELD_NO_OVERRIDE_KEY)
+    return legacy ? JSON.parse(legacy) : {}
+  } catch { return {} }
 }
 function _writeFieldNoOverrides(next) {
-  try { localStorage.setItem(FIELD_NO_OVERRIDE_KEY, JSON.stringify(next)) } catch {}
+  try { localStorage.setItem(_fieldNoOverrideKey(), JSON.stringify(next)) } catch {}
   _fieldNoOverrideListeners.forEach(fn => fn(next))
 }
 // 圃場選択UIから呼び出す共通フック。登録すると同じページを開いている他のUIにも即反映される。
