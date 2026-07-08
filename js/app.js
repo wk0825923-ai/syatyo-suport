@@ -38,8 +38,12 @@
   const [page,      setPage]     = React.useState('dashboard')
   // 【スタッフ画面】'admin'(経営者フル機能) / 'staff'(日報だけの簡易入力)。
   // ?view=staff で初期表示をスタッフ画面に。データは同じstate/localStorageなので同一端末で連動。
-  const [viewMode, setViewMode] = React.useState(() =>
-    new URLSearchParams(window.location.search).get('view') === 'staff' ? 'staff' : 'admin')
+  const [viewMode, setViewMode] = React.useState(() => {
+    // ?view=staff または ログイン時に「スタッフ」を選んだ場合(sb_role)はスタッフ画面で開始
+    if (new URLSearchParams(window.location.search).get('view') === 'staff') return 'staff'
+    try { if (localStorage.getItem('sb_role') === 'staff') return 'staff' } catch (_) {}
+    return 'admin'
+  })
   // 整合性チェックの「該当箇所を開く」で、日報管理に飛んで該当記録の編集モーダルを直接開くための一発ジャンプ
   const [focusRecordId, setFocusRecordId] = React.useState(null)
   const navigateTo = (p, focus) => { if (focus != null) setFocusRecordId(focus); setPage(p) }

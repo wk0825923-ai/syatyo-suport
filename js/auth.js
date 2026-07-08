@@ -7,8 +7,11 @@
 }
 
 function LoginScreen({ onAuth }) {
+  const ls = (k, d) => { try { return localStorage.getItem(k) || d } catch (_) { return d } }
   const [mode,     setMode]     = React.useState('login')
-  const [email,    setEmail]    = React.useState('')
+  const [role,     setRole]     = React.useState(() => ls('sb_role', 'admin'))   // 管理者 / スタッフ
+  const [name,     setName]     = React.useState(() => ls('sb_name', ''))         // 名前（次回自動入力）
+  const [email,    setEmail]    = React.useState(() => ls('sb_email', ''))        // メール（次回自動入力）
   const [password, setPassword] = React.useState('')
   const [loading,  setLoading]  = React.useState(false)
   const [error,    setError]    = React.useState('')
@@ -36,7 +39,10 @@ function LoginScreen({ onAuth }) {
     try {
       if (mode === 'login') {
         const { data, error:err } = await sb.auth.signInWithPassword({ email, password })
-        if (err) throw err; onAuth(data.user)
+        if (err) throw err
+        // 役割・名前・メールを記憶（次回自動入力＋役割で初期画面を振り分け＋作業者名の既定に）
+        try { localStorage.setItem('sb_role', role); localStorage.setItem('sb_name', name.trim()); localStorage.setItem('sb_email', email) } catch (_) {}
+        onAuth(data.user)
       } else {
         const { error:err } = await sb.auth.signUp({ email, password })
         if (err) throw err
@@ -48,10 +54,29 @@ function LoginScreen({ onAuth }) {
   }
   return React.createElement('div', { style:{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', width:'100%', background:'#FAFBFA' } },
     React.createElement('div', { style:{ background:'#fff', borderRadius:12, padding:40, width:380, boxShadow:'0 4px 24px rgba(10,107,82,.12)', border:'1px solid #DDE8DE' } },
-      React.createElement('div', { style:{ textAlign:'center', marginBottom:28 } },
+      React.createElement('div', { style:{ textAlign:'center', marginBottom:22 } },
         React.createElement('div', { style:{ fontSize:36, marginBottom:8 } }, '🌱'),
         React.createElement('h1', { style:{ fontSize:20, fontWeight:700, color:'#111827', margin:'0 0 4px' } }, '農場管理システム'),
         React.createElement('p', { style:{ color:'#64748B', fontSize:13, margin:0 } }, mode === 'login' ? 'ログイン' : '新規登録')
+      ),
+
+      // 役割の選択（管理者 / スタッフ）— ログイン時のみ。選ぶと初期画面が変わり、次回は記憶される。
+      mode === 'login' && React.createElement('div', { style:{ marginBottom:16 } },
+        React.createElement('span', { style:{ ...spn, marginBottom:6 } }, 'どちらで使いますか？'),
+        React.createElement('div', { style:{ display:'flex', gap:8 } },
+          ...[['admin','🏢 管理者','農場全体の管理'],['staff','👤 スタッフ','日報の入力']].map(([k,lab,desc]) =>
+            React.createElement('button', { key:k, type:'button', onClick:()=>setRole(k),
+              style:{ flex:1, padding:'10px 8px', borderRadius:10, cursor:'pointer', textAlign:'center',
+                border:'2px solid '+(role===k?'#0A6B52':'#E5E7EB'), background: role===k?'#F0FDF4':'#fff' } },
+              React.createElement('div', { style:{ fontSize:14, fontWeight:700, color: role===k?'#0A6B52':'#374151' } }, lab),
+              React.createElement('div', { style:{ fontSize:10, color:'#94A3B8', marginTop:2 } }, desc)
+            ))
+        )
+      ),
+      // 名前（次回自動入力・作業者名の既定になる）
+      mode === 'login' && React.createElement('label', { style:lbl },
+        React.createElement('span', { style:spn }, 'お名前' + (role==='staff'?'（作業者名になります）':'')),
+        React.createElement('input', { type:'text', value:name, onChange:e=>setName(e.target.value), placeholder:'例: 中川 太郎', style:inp })
       ),
 
       // デモアカウント案内

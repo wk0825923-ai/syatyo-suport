@@ -4535,10 +4535,12 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
   // inModal かつ圃場が1件のとき、その圃場をプリセット
   const isFieldPreset = inModal && fields.length === 1
   const presetFieldId = isFieldPreset ? String(fields[0].id) : ''
+  // ログイン時に入力した名前を作業者名の既定に（毎回入れ直さなくてよい）
+  const savedWorker = (() => { try { return localStorage.getItem('sb_name') || '' } catch (_) { return '' } })()
   const [form, setForm]         = React.useState({
     date: todayYmd(),
     field_id: presetFieldId, field_ids: [], work_type: '', pesticide_id: '',
-    amount: '', weather: '晴', worker: '', note: '', checks: {},
+    amount: '', weather: '晴', worker: savedWorker, note: '', checks: {},
     start_time: '08:00', end_time: '17:00', break_minutes: 60,
     spray_method: '',       // 使用方法（散布・株元散布・土壌混和・灌注）
     machine_no: '',         // 使用機械No.
@@ -4616,7 +4618,7 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
       date: f.date,
       weather: f.weather,
       work_type: f.work_type,
-      field_id: '', field_ids: [], pesticide_id: '', amount: '', worker: '', note: '', checks: {}, photos: []
+      field_id: '', field_ids: [], pesticide_id: '', amount: '', worker: savedWorker, note: '', checks: {}, photos: []
     }))
     setDilution(1000)
     setPhotoError('')
