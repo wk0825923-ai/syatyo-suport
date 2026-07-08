@@ -8279,7 +8279,7 @@ function ConfirmDeleteModal({ title='削除しますか？', targetName, detail,
   )
 }
 
-function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavigate, cropCategories, farmLots={}, lotSprayRecords=[], topDressingRecords=[], harvestRecords=[] }) {
+function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavigate, cropCategories, farmLots={}, lotSprayRecords=[], topDressingRecords=[], harvestRecords=[], pesticides=[] }) {
   const [showAdd,setShowAdd] = React.useState(false)
   // 地図クリックで新規圃場を登録する際の選択地点（モーダル表示トリガー）
   const [pendingLatLng, setPendingLatLng] = React.useState(null)
@@ -8350,17 +8350,30 @@ function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavi
         const stLabel = lot && lot.status ? (ROW_STATUS_CONFIG[lot.status] ? ROW_STATUS_CONFIG[lot.status].label : lot.status) : ''
         const tip = f.name + ' 畝' + bp.bed + (lot ? '｜' + (lot.variety || f.crop || '') + (stLabel ? '（' + stLabel + '）' : '') : '｜空き')
         // 畝カルテ: この畝に重なる施肥/防除/収穫を集計
-        const sprays = bedOverlap(lotSprayRecords, f.id, bp.bed).length
+        const sprayRecs = bedOverlap(lotSprayRecords, f.id, bp.bed)
+        const sprays = sprayRecs.length
         const ferts  = bedOverlap(topDressingRecords, f.id, bp.bed).length
         const harvs  = bedOverlap(harvestRecords, f.id, bp.bed)
         const cases  = harvs.reduce((a,h)=> a + (Number(h.total_cases)|| (h.shipments||[]).reduce((s,x)=>s+(Number(x.cases)||0),0) || 0), 0)
+        // 【畝カルテのGAP適合フラグ】この畝で PHI(収穫前日数)違反 / 農薬の年間使用回数オーバー が無いか。
+        const pById = (id) => (pesticides||[]).find(p=>p.id===id)
+        const dayDiff = (a,b)=>{ try{ return Math.round((new Date(b)-new Date(a))/86400000) }catch(e){ return NaN } }
+        let phiIssue=false, overIssue=false
+        try {
+          harvs.forEach(h=> sprayRecs.forEach(sr=> (sr.pesticides||[]).forEach(pp=>{ const pe=pById(pp.pesticide_id); if(pe&&pe.preharvest_days!=null&&sr.date&&h.date){ const g=dayDiff(sr.date,h.date); if(g>=0&&g<pe.preharvest_days) phiIssue=true } })))
+          const cnt={}; sprayRecs.forEach(sr=> (sr.pesticides||[]).forEach(pp=>{ const y=(sr.date||'').slice(0,4); const k=pp.pesticide_id+'|'+y; cnt[k]=(cnt[k]||0)+1 }))
+          Object.entries(cnt).forEach(([k,n])=>{ const pe=pById(Number(k.split('|')[0])); if(pe&&pe.max_times&&n>pe.max_times) overIssue=true })
+        } catch(e){}
         const esc = (typeof escHtml==='function') ? escHtml : (s)=>String(s==null?'':s)
-        const popup = '<div style="min-width:180px">'
+        const flags = (phiIssue?'<span style="color:#DC2626;font-weight:700">⚠️ PHI注意</span>':'') + (phiIssue&&overIssue?'　':'') + (overIssue?'<span style="color:#DC2626;font-weight:700">⚠️ 農薬回数超過</span>':'')
+        const okFlag = (!phiIssue&&!overIssue&&(sprays>0||harvs.length>0)) ? '<span style="color:#0A6B52;font-weight:700">✅ GAP適合</span>' : ''
+        const popup = '<div style="min-width:190px">'
           + '<div style="font-weight:800;color:#0A6B52">' + esc(f.name) + ' ／ 畝' + bp.bed + '</div>'
           + '<div style="font-size:12px;color:#374151;margin:3px 0">' + (lot ? esc(lot.variety||f.crop||'') + (stLabel?'（'+esc(stLabel)+'）':'') : '<span style="color:#94A3B8">空き畝</span>') + '</div>'
           + '<div style="display:flex;gap:10px;font-size:12px;margin:6px 0;color:#475569">'
           +   '<span>💊 防除 <b>' + sprays + '</b></span><span>🌱 施肥 <b>' + ferts + '</b></span><span>🧺 収穫 <b>' + cases + '</b></span>'
           + '</div>'
+          + ((flags||okFlag) ? '<div style="font-size:11px;margin:2px 0 6px">' + (flags||okFlag) + '</div>' : '')
           + '<div class="popup-goto-field" data-field-id="' + f.id + '" style="margin-top:6px;padding:6px 10px;background:#0A6B52;color:#fff;border-radius:6px;text-align:center;font-size:12px;font-weight:600;cursor:pointer">圃場詳細を見る →</div>'
           + '</div>'
         L.polygon(bp.corners,{ color:col, weight:1, fillColor:col, fillOpacity: filled ? .45 : .12 })
@@ -8384,7 +8397,7 @@ function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavi
       const btn  = node && node.querySelector('.popup-goto-field')
       if (btn) btn.onclick = () => onNavigate && onNavigate('field:' + btn.getAttribute('data-field-id') + ':dashboard')
     })
-  },[fields, farmLots, lotSprayRecords, topDressingRecords, harvestRecords])
+  },[fields, farmLots, lotSprayRecords, topDressingRecords, harvestRecords, pesticides])
   const listEl = fields.length === 0
     ? React.createElement('div', { style:{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'56px 24px', gap:14, textAlign:'center', background:'#fff', borderRadius:12, border:'1.5px dashed #C6DDD0' } },
         React.createElement('div', { style:{ width:64, height:64, borderRadius:'50%', background:'#F0F8F4', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:4 } },
@@ -8583,8 +8596,8 @@ function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavi
 // =====================================================
 // CAT-05-3: FieldMapPage / FieldTablePage — FieldList から分割した専用コンポーネント
 // =====================================================
-function FieldMapPage({ fields, onAdd, onDelete, cropCycles, onNavigate, cropCategories, farmLots, lotSprayRecords, topDressingRecords, harvestRecords }) {
-  return React.createElement(FieldList, { fields, onAdd, onDelete, mode:'map', cropCycles, onNavigate, cropCategories, farmLots, lotSprayRecords, topDressingRecords, harvestRecords })
+function FieldMapPage({ fields, onAdd, onDelete, cropCycles, onNavigate, cropCategories, farmLots, lotSprayRecords, topDressingRecords, harvestRecords, pesticides }) {
+  return React.createElement(FieldList, { fields, onAdd, onDelete, mode:'map', cropCycles, onNavigate, cropCategories, farmLots, lotSprayRecords, topDressingRecords, harvestRecords, pesticides })
 }
 function FieldTablePage({ fields, onAdd, onDelete, cropCycles, onNavigate, cropCategories }) {
   return React.createElement(FieldList, { fields, onAdd, onDelete, mode:'list', cropCycles, onNavigate, cropCategories })
