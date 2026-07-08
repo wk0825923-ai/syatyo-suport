@@ -13,6 +13,17 @@ function LoginScreen({ onAuth }) {
   const [loading,  setLoading]  = React.useState(false)
   const [error,    setError]    = React.useState('')
   const [success,  setSuccess]  = React.useState('')
+  const [showPw,   setShowPw]   = React.useState(false)
+  // パスワード条件（新規登録時）。満たすと緑チェックになる。
+  const pwReqs = [
+    { key:'len',    label:'8文字以上',        ok: password.length >= 8 },
+    { key:'lower',  label:'英小文字を1つ以上', ok: /[a-z]/.test(password) },
+    { key:'symbol', label:'記号を1つ以上',     ok: /[^A-Za-z0-9]/.test(password) },
+  ]
+  const pwMet   = pwReqs.filter(r => r.ok).length
+  const pwScore = password ? Math.min(4, pwMet + (password.length >= 12 ? 1 : 0)) : 0
+  const pwMeta  = pwScore >= 3 ? { label:'強い', color:'#0A6B52' } : pwScore === 2 ? { label:'普通', color:'#B45309' } : { label:'弱い', color:'#DC2626' }
+  const signupOk = pwReqs.every(r => r.ok)
   const inp  = { width:'100%', padding:'8px 12px', border:'1px solid #D8E0DA', borderRadius:6, fontSize:14, outline:'none', boxSizing:'border-box' }
   const lbl  = { display:'block', marginBottom:14 }
   const spn  = { fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:4 }
@@ -58,10 +69,33 @@ function LoginScreen({ onAuth }) {
 
       React.createElement('form', { onSubmit:handle },
         React.createElement('label', { style:lbl }, React.createElement('span', { style:spn }, 'メールアドレス'), React.createElement('input', { type:'email', value:email, onChange:e=>setEmail(e.target.value), required:true, placeholder:'farm@example.com', style:inp })),
-        React.createElement('label', { style:{...lbl, marginBottom:20} }, React.createElement('span', { style:spn }, 'パスワード'), React.createElement('input', { type:'password', value:password, onChange:e=>setPassword(e.target.value), required:true, minLength:6, placeholder:'6文字以上', style:inp })),
+        // パスワード（目のトグル付き）
+        React.createElement('label', { style:{...lbl, marginBottom: mode==='signup'?10:20} },
+          React.createElement('span', { style:spn }, 'パスワード'),
+          React.createElement('div', { style:{ position:'relative' } },
+            React.createElement('input', { type: showPw?'text':'password', value:password, onChange:e=>setPassword(e.target.value), required:true, minLength: mode==='signup'?8:6, placeholder: mode==='signup'?'安全なパスワードを作成':'パスワード', style:{ ...inp, paddingRight:38 } }),
+            React.createElement('button', { type:'button', onClick:()=>setShowPw(s=>!s), 'aria-label':'パスワード表示切替',
+              style:{ position:'absolute', right:8, top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', color:'#9CA3AF', display:'flex', padding:2 } },
+              React.createElement('i', { className:'ti ti-'+(showPw?'eye':'eye-off'), style:{ fontSize:18 } })
+            )
+          )
+        ),
+        // 新規登録時: 強度メーター＋条件チェックリスト（満たすと緑✓）
+        mode==='signup' && React.createElement('div', { style:{ marginBottom:16 } },
+          React.createElement('div', { style:{ display:'flex', gap:6, marginBottom:6 } },
+            ...[0,1,2,3].map(i => React.createElement('div', { key:i, style:{ flex:1, height:5, borderRadius:3, background: i<pwScore ? pwMeta.color : '#E5E7EB', transition:'background .25s' } }))
+          ),
+          password && React.createElement('div', { style:{ fontSize:12, fontWeight:700, color:pwMeta.color, marginBottom:8 } }, pwMeta.label),
+          React.createElement('div', { style:{ fontSize:12, color:'#6B7280', marginBottom:6 } }, '次の条件を満たしてください：'),
+          ...pwReqs.map(r => React.createElement('div', { key:r.key, style:{ display:'flex', alignItems:'center', gap:8, fontSize:13, color: r.ok?'#0A6B52':'#6B7280', marginBottom:4, transition:'color .2s' } },
+            React.createElement('i', { className:'ti ti-'+(r.ok?'circle-check-filled':'circle'), style:{ fontSize:16, color: r.ok?'#0A6B52':'#CBD5E1' } }),
+            r.label
+          ))
+        ),
         error   && React.createElement('div', { style:{ background:'#FEF2F2', border:'1px solid #FCA5A5', borderRadius:6, padding:'8px 12px', marginBottom:12, fontSize:13, color:'#DC2626' } }, error),
         success && React.createElement('div', { style:{ background:'#F0FDF4', border:'1px solid #86EFAC', borderRadius:6, padding:'8px 12px', marginBottom:12, fontSize:13, color:'#15803D' } }, success),
-        React.createElement('button', { type:'submit', disabled:loading, style:{ width:'100%', padding:10, background:loading?'#6EE7B7':'#0A6B52', color:'#fff', border:'none', borderRadius:6, fontSize:14, fontWeight:600, cursor:loading?'not-allowed':'pointer' } }, loading ? '処理中...' : (mode==='login' ? 'ログイン' : '登録する'))
+        React.createElement('button', { type:'submit', disabled: loading || (mode==='signup' && !signupOk),
+          style:{ width:'100%', padding:11, background: (loading || (mode==='signup'&&!signupOk)) ? '#A7D3C6' : '#0A6B52', color:'#fff', border:'none', borderRadius:8, fontSize:14, fontWeight:700, cursor:(loading || (mode==='signup'&&!signupOk))?'not-allowed':'pointer', transition:'background .2s' } }, loading ? '処理中...' : (mode==='login' ? 'ログイン' : '続ける'))
       ),
       React.createElement('div', { style:{ textAlign:'center', marginTop:16 } },
         React.createElement('button', { onClick:()=>{ setMode(mode==='login'?'signup':'login'); setError(''); setSuccess('') }, style:{ background:'none', border:'none', color:'#0A6B52', cursor:'pointer', fontSize:13, fontWeight:600 } }, mode==='login' ? 'アカウントをお持ちでない方はこちら' : 'すでにアカウントをお持ちの方')
