@@ -22,6 +22,31 @@ function escHtml(v) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 }
 
+// 重い出力ライブラリ(jsPDF/html2canvas/xlsx=計約1.5MB)は初期ロードから外し、PDF/Excel出力を
+// 押した時に遅延ロードする。日々の記録入力（特に低速回線の現場スタッフ）の初期表示を軽くするため。
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    const found = [...document.scripts].find(s => s.dataset && s.dataset.lazySrc === src)
+    if (found) {
+      if (found.dataset.loaded === '1') return resolve()
+      found.addEventListener('load', () => resolve()); found.addEventListener('error', () => reject(new Error('読み込み失敗')))
+      return
+    }
+    const s = document.createElement('script')
+    s.src = src; s.dataset.lazySrc = src
+    s.onload = () => { s.dataset.loaded = '1'; resolve() }
+    s.onerror = () => reject(new Error('スクリプトの読み込みに失敗しました（通信環境をご確認ください）'))
+    document.head.appendChild(s)
+  })
+}
+async function ensurePdfLibs() {
+  if (typeof window.jspdf === 'undefined') await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+  if (typeof window.html2canvas === 'undefined') await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
+}
+async function ensureXlsx() {
+  if (typeof window.XLSX === 'undefined') await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js')
+}
+
 const CONFIG = {
   FARM_NAME:     '農場名',
   JGAP_CERT_NO:  'JGAP-XXXX-XXXXX',
@@ -384,6 +409,7 @@ function buildSprayTableHTML(sprayRecords, fields, pesticides) {
 async function exportSingleSprayRecordPDF(record, fields, pesticides) {
   const el = document.getElementById('pdf-preview')
   try {
+    await ensurePdfLibs()
     el.innerHTML = buildSprayTableHTML([record], fields, pesticides)
     const canvas = await html2canvas(el, { scale: 2, useCORS: true, logging: false })
     const { jsPDF } = window.jspdf
@@ -449,6 +475,7 @@ async function exportSprayPDF(records, fields, pesticides) {
   // CAT-07-1: try-catch でキャプチャ・PDF生成エラーを捕捉
   const el = document.getElementById('pdf-preview')
   try {
+    await ensurePdfLibs()
     const sprayRecords = records.filter(r => r.work_type === '農薬散布')
 
     // GAP様式テーブルHTML を生成（C02-3: buildSprayTableHTML 共通関数を使用）
@@ -475,7 +502,7 @@ async function exportSprayPDF(records, fields, pesticides) {
 // C-3: 施肥記録 Excel出力（SheetJS）
 // fertilizer_records モックデータを xlsx として出力
 // =====================================================
-function exportFertilizerExcel(records, fields) {
+async function exportFertilizerExcel(records, fields) {
   const fertRecords = records.filter(r => r.work_type === '施肥')
 
   // CAT-07-2: 0件の場合は空ファイルを渡すのではなく早期returnでユーザーに通知
@@ -498,11 +525,16 @@ function exportFertilizerExcel(records, fields) {
     }
   })
 
-  const ws = XLSX.utils.json_to_sheet(data)
-  ws['!cols'] = [{ wch:12 },{ wch:15 },{ wch:15 },{ wch:20 },{ wch:12 },{ wch:15 },{ wch:8 },{ wch:20 }]
+  try {
+    await ensureXlsx()
+    const ws = XLSX.utils.json_to_sheet(data)
+    ws['!cols'] = [{ wch:12 },{ wch:15 },{ wch:15 },{ wch:20 },{ wch:12 },{ wch:15 },{ wch:8 },{ wch:20 }]
 
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, '施肥記録')
-  XLSX.writeFile(wb, '施肥記録簿_農場名.xlsx')
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, '施肥記録')
+    XLSX.writeFile(wb, '施肥記録簿_農場名.xlsx')
+  } catch (e) {
+    showToast('Excel出力に失敗しました: ' + e.message, 'error')
+  }
 }
 

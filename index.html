@@ -12,14 +12,13 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
-  <!-- React 18 -->
-  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <!-- React 18（本番ビルド: 開発ビルドは約2.2MBあり低速回線で初期表示が数十秒遅れるため .production.min を使用） -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 
-  <!-- PDF / Excel 出力 -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- PDF / Excel 出力ライブラリ(jsPDF/html2canvas/xlsx 計約1.5MB)は初期ロードから外し、
+       出力ボタンを押した時に config.js の ensurePdfLibs()/ensureXlsx() で遅延ロードする。
+       日々の記録入力（特に低速回線の現場スタッフ）の初期表示を軽くするため。 -->
 
   <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>

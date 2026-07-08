@@ -11923,6 +11923,7 @@ function StaffList({ staff, onAdd, onDelete, onUpdate }) {
 // 既存の exportCropPlanPDF と同じパターン（非表示プレビュー→キャプチャ→jsPDF）を流用
 // =====================================================
 async function exportTraineeDiaryPDF(staffMember, monthLabel, diaryRows, summary) {
+  await ensurePdfLibs()
   const el = document.getElementById('diary-pdf-preview')
   const today = new Date().toLocaleDateString('ja-JP', { year:'numeric', month:'long', day:'numeric' })
   const natLabel = NAT_LABEL
@@ -13054,6 +13055,7 @@ function Settings() {
 // 作付計画: PDF出力（html2canvas利用）
 // =====================================================
 async function exportCropPlanPDF(plans, fields) {
+  await ensurePdfLibs()
   const el = document.getElementById('crop-plan-pdf-preview')
   const today = new Date().toLocaleDateString('ja-JP', { year:'numeric', month:'long', day:'numeric' })
 
