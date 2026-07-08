@@ -8279,7 +8279,7 @@ function ConfirmDeleteModal({ title='削除しますか？', targetName, detail,
   )
 }
 
-function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavigate, cropCategories }) {
+function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavigate, cropCategories, farmLots={} }) {
   const [showAdd,setShowAdd] = React.useState(false)
   // 地図クリックで新規圃場を登録する際の選択地点（モーダル表示トリガー）
   const [pendingLatLng, setPendingLatLng] = React.useState(null)
@@ -8335,11 +8335,19 @@ function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavi
     const map=mapInstanceRef.current; if (!map) return
     map.eachLayer(l=>{if (l instanceof L.CircleMarker || l instanceof L.Polygon) map.removeLayer(l)})
     // 【畝マップ】row_count と緯度経度がある圃場は、衛星の上に畝の矩形を自動生成して重ねる。
+    // 各畝は「その畝番号を含むロット(作付)」の状態で色分けし、どの畝に何が植わっているか一目で分かる。
     // 畝をタップすると圃場詳細へ。輪郭の手動登録が無くても畝レイアウトが見える（自動生成）。
+    const BED_STATUS_COLOR = { growing:'#0D9972', ready:'#D97706', harvested:'#94A3B8', fallow:'#CBD5E1' }
     fields.filter(f=>Number.isFinite(Number(f.lat))&&Number.isFinite(Number(f.lng))&&Number(f.row_count)>0).forEach(f=>{
+      const lots = (farmLots && farmLots[f.id]) || []
+      const lotOfBed = (bed) => lots.find(l => { try { return parseRowRange(l.row_range).has(bed) } catch(e){ return false } })
       generateBedPolygons(f).forEach(bp=>{
-        L.polygon(bp.corners,{color:f.color||'#0A6B52',weight:1,fillColor:f.color||'#0A6B52',fillOpacity:.35})
-          .bindTooltip(f.name+' 畝'+bp.bed,{direction:'top',opacity:.9})
+        const lot = lotOfBed(bp.bed)
+        const col = lot ? (BED_STATUS_COLOR[lot.status] || f.color || '#0A6B52') : (f.color || '#0A6B52')
+        const filled = !!lot
+        const tip = f.name + ' 畝' + bp.bed + (lot ? '｜' + (lot.variety || f.crop || '') + (lot.status ? '（' + (ROW_STATUS_CONFIG[lot.status] ? ROW_STATUS_CONFIG[lot.status].label : lot.status) + '）' : '') : '｜空き')
+        L.polygon(bp.corners,{ color:col, weight:1, fillColor:col, fillOpacity: filled ? .45 : .12 })
+          .bindTooltip(tip,{direction:'top',opacity:.9})
           .on('click',()=>{ onNavigate && onNavigate('field:'+f.id+':dashboard') })
           .addTo(map)
       })
@@ -8359,7 +8367,7 @@ function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavi
       const btn  = node && node.querySelector('.popup-goto-field')
       if (btn) btn.onclick = () => onNavigate && onNavigate('field:' + btn.getAttribute('data-field-id') + ':dashboard')
     })
-  },[fields])
+  },[fields, farmLots])
   const listEl = fields.length === 0
     ? React.createElement('div', { style:{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'56px 24px', gap:14, textAlign:'center', background:'#fff', borderRadius:12, border:'1.5px dashed #C6DDD0' } },
         React.createElement('div', { style:{ width:64, height:64, borderRadius:'50%', background:'#F0F8F4', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:4 } },
@@ -8558,8 +8566,8 @@ function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavi
 // =====================================================
 // CAT-05-3: FieldMapPage / FieldTablePage — FieldList から分割した専用コンポーネント
 // =====================================================
-function FieldMapPage({ fields, onAdd, onDelete, cropCycles, onNavigate, cropCategories }) {
-  return React.createElement(FieldList, { fields, onAdd, onDelete, mode:'map', cropCycles, onNavigate, cropCategories })
+function FieldMapPage({ fields, onAdd, onDelete, cropCycles, onNavigate, cropCategories, farmLots }) {
+  return React.createElement(FieldList, { fields, onAdd, onDelete, mode:'map', cropCycles, onNavigate, cropCategories, farmLots })
 }
 function FieldTablePage({ fields, onAdd, onDelete, cropCycles, onNavigate, cropCategories }) {
   return React.createElement(FieldList, { fields, onAdd, onDelete, mode:'list', cropCycles, onNavigate, cropCategories })
