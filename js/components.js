@@ -16188,6 +16188,18 @@ function usePersistState(key, initial) {
       return next
     })
   }, [key])
+  // 【同時利用の手戻り防止】管理者とスタッフが同じ農場を別タブで開いている時、片方の保存が
+  // もう片方の in-memory state で上書きされて消える(last-write-win)のを防ぐ。別タブが同じキーを
+  // 更新したら storage イベントで自分の state も最新に追随させる（次の保存が古い状態を書き戻さない）。
+  React.useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key !== key) return
+      try { setState(e.newValue != null ? JSON.parse(e.newValue) : initial) }
+      catch (_) { /* 壊れた値は無視（現状維持） */ }
+    }
+    if (typeof window !== 'undefined') window.addEventListener('storage', onStorage)
+    return () => { if (typeof window !== 'undefined') window.removeEventListener('storage', onStorage) }
+  }, [key])
   return [state, setPersist]
 }
 
