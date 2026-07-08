@@ -8279,7 +8279,7 @@ function ConfirmDeleteModal({ title='削除しますか？', targetName, detail,
   )
 }
 
-function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavigate, cropCategories, farmLots={} }) {
+function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavigate, cropCategories, farmLots={}, lotSprayRecords=[], topDressingRecords=[], harvestRecords=[] }) {
   const [showAdd,setShowAdd] = React.useState(false)
   // 地図クリックで新規圃場を登録する際の選択地点（モーダル表示トリガー）
   const [pendingLatLng, setPendingLatLng] = React.useState(null)
@@ -8338,6 +8338,8 @@ function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavi
     // 各畝は「その畝番号を含むロット(作付)」の状態で色分けし、どの畝に何が植わっているか一目で分かる。
     // 畝をタップすると圃場詳細へ。輪郭の手動登録が無くても畝レイアウトが見える（自動生成）。
     const BED_STATUS_COLOR = { growing:'#0D9972', ready:'#D97706', harvested:'#94A3B8', fallow:'#CBD5E1' }
+    // 指定畝(field×bed)に重なる記録を数える（畝カルテ用）
+    const bedOverlap = (recs, fid, bed) => (recs||[]).filter(r => r.field_id===fid && (()=>{ try { return parseRowRange(r.row_range).has(bed) } catch(e){ return false } })())
     fields.filter(f=>Number.isFinite(Number(f.lat))&&Number.isFinite(Number(f.lng))&&Number(f.row_count)>0).forEach(f=>{
       const lots = (farmLots && farmLots[f.id]) || []
       const lotOfBed = (bed) => lots.find(l => { try { return parseRowRange(l.row_range).has(bed) } catch(e){ return false } })
@@ -8345,10 +8347,25 @@ function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavi
         const lot = lotOfBed(bp.bed)
         const col = lot ? (BED_STATUS_COLOR[lot.status] || f.color || '#0A6B52') : (f.color || '#0A6B52')
         const filled = !!lot
-        const tip = f.name + ' 畝' + bp.bed + (lot ? '｜' + (lot.variety || f.crop || '') + (lot.status ? '（' + (ROW_STATUS_CONFIG[lot.status] ? ROW_STATUS_CONFIG[lot.status].label : lot.status) + '）' : '') : '｜空き')
+        const stLabel = lot && lot.status ? (ROW_STATUS_CONFIG[lot.status] ? ROW_STATUS_CONFIG[lot.status].label : lot.status) : ''
+        const tip = f.name + ' 畝' + bp.bed + (lot ? '｜' + (lot.variety || f.crop || '') + (stLabel ? '（' + stLabel + '）' : '') : '｜空き')
+        // 畝カルテ: この畝に重なる施肥/防除/収穫を集計
+        const sprays = bedOverlap(lotSprayRecords, f.id, bp.bed).length
+        const ferts  = bedOverlap(topDressingRecords, f.id, bp.bed).length
+        const harvs  = bedOverlap(harvestRecords, f.id, bp.bed)
+        const cases  = harvs.reduce((a,h)=> a + (Number(h.total_cases)|| (h.shipments||[]).reduce((s,x)=>s+(Number(x.cases)||0),0) || 0), 0)
+        const esc = (typeof escHtml==='function') ? escHtml : (s)=>String(s==null?'':s)
+        const popup = '<div style="min-width:180px">'
+          + '<div style="font-weight:800;color:#0A6B52">' + esc(f.name) + ' ／ 畝' + bp.bed + '</div>'
+          + '<div style="font-size:12px;color:#374151;margin:3px 0">' + (lot ? esc(lot.variety||f.crop||'') + (stLabel?'（'+esc(stLabel)+'）':'') : '<span style="color:#94A3B8">空き畝</span>') + '</div>'
+          + '<div style="display:flex;gap:10px;font-size:12px;margin:6px 0;color:#475569">'
+          +   '<span>💊 防除 <b>' + sprays + '</b></span><span>🌱 施肥 <b>' + ferts + '</b></span><span>🧺 収穫 <b>' + cases + '</b></span>'
+          + '</div>'
+          + '<div class="popup-goto-field" data-field-id="' + f.id + '" style="margin-top:6px;padding:6px 10px;background:#0A6B52;color:#fff;border-radius:6px;text-align:center;font-size:12px;font-weight:600;cursor:pointer">圃場詳細を見る →</div>'
+          + '</div>'
         L.polygon(bp.corners,{ color:col, weight:1, fillColor:col, fillOpacity: filled ? .45 : .12 })
           .bindTooltip(tip,{direction:'top',opacity:.9})
-          .on('click',()=>{ onNavigate && onNavigate('field:'+f.id+':dashboard') })
+          .bindPopup(popup)
           .addTo(map)
       })
     })
@@ -8367,7 +8384,7 @@ function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavi
       const btn  = node && node.querySelector('.popup-goto-field')
       if (btn) btn.onclick = () => onNavigate && onNavigate('field:' + btn.getAttribute('data-field-id') + ':dashboard')
     })
-  },[fields, farmLots])
+  },[fields, farmLots, lotSprayRecords, topDressingRecords, harvestRecords])
   const listEl = fields.length === 0
     ? React.createElement('div', { style:{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'56px 24px', gap:14, textAlign:'center', background:'#fff', borderRadius:12, border:'1.5px dashed #C6DDD0' } },
         React.createElement('div', { style:{ width:64, height:64, borderRadius:'50%', background:'#F0F8F4', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:4 } },
@@ -8566,8 +8583,8 @@ function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavi
 // =====================================================
 // CAT-05-3: FieldMapPage / FieldTablePage — FieldList から分割した専用コンポーネント
 // =====================================================
-function FieldMapPage({ fields, onAdd, onDelete, cropCycles, onNavigate, cropCategories, farmLots }) {
-  return React.createElement(FieldList, { fields, onAdd, onDelete, mode:'map', cropCycles, onNavigate, cropCategories, farmLots })
+function FieldMapPage({ fields, onAdd, onDelete, cropCycles, onNavigate, cropCategories, farmLots, lotSprayRecords, topDressingRecords, harvestRecords }) {
+  return React.createElement(FieldList, { fields, onAdd, onDelete, mode:'map', cropCycles, onNavigate, cropCategories, farmLots, lotSprayRecords, topDressingRecords, harvestRecords })
 }
 function FieldTablePage({ fields, onAdd, onDelete, cropCycles, onNavigate, cropCategories }) {
   return React.createElement(FieldList, { fields, onAdd, onDelete, mode:'list', cropCycles, onNavigate, cropCategories })
