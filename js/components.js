@@ -8284,8 +8284,14 @@ function FieldList({ fields, onAdd, onDelete, mode='full', cropCycles=[], onNavi
 
   React.useEffect(()=>{
     if (!mapRef.current||mapInstanceRef.current) return
-    const map = L.map(mapRef.current).setView([35.384,139.925],14)
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map)
+    const map = L.map(mapRef.current).setView([35.384,139.925],15)
+    // 衛星写真を既定に（現場の圃場は形・位置が衛星で分かる）。国土地理院(日本公式・無料・キー不要)を基本、
+    // 高解像のEsri、通常地図も切り替え可能。畝マップ(次段階)の背景にもこの衛星レイヤを使う。
+    const gsiPhoto = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', { attribution:'地理院タイル（シームレス空中写真）', maxZoom:18 })
+    const esriImg  = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution:'© Esri World Imagery', maxZoom:19 })
+    const osm      = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap', maxZoom:19 })
+    gsiPhoto.addTo(map)
+    L.control.layers({ '衛星写真（地理院）':gsiPhoto, '衛星写真（Esri・高解像）':esriImg, '地図':osm }, null, { collapsed:false, position:'topright' }).addTo(map)
     mapInstanceRef.current = map
 
     // B-4: マップクリックで新規圃場登録 → モーダルで入力（旧: window.prompt連打）
