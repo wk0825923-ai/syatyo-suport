@@ -4591,7 +4591,10 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
     const last = {}
     ;(records || []).forEach(r => {
       if (r.field_id == null) return
-      const key = String(r.date || '0000-00-00') + '#' + String(r.id || 0).padStart(16, '0')
+      // 妥当な YYYY-MM-DD 以外(空/破損/インポート異常)は最古扱いにして「最新」誤判定を防ぐ（番人監査 P1 Low-1）
+      const rawDate = String(r.date || '')
+      const safeDate = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : '0000-00-00'
+      const key = safeDate + '#' + String(r.id || 0).padStart(16, '0')
       if (!last[r.field_id] || key > last[r.field_id]) last[r.field_id] = key
     })
     return Object.keys(last).map(Number).sort((a, b) => last[b].localeCompare(last[a]))
