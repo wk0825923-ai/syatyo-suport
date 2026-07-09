@@ -32,7 +32,7 @@ const ensureApp=async(page)=>{ if(!(await page.evaluate(()=>!!document.querySele
     const set=(k,v)=>localStorage.setItem(k+'_'+fid,JSON.stringify(v))
     set('farm_fields_v2',[{id:1,name:'第1圃場',field_no:'1',crop:'レタス',area_are:10,color:'#0D9972',row_count:6,crop_category:'leaf_veg'}])
     set('farm_lots',{1:[{id:'L1',field_id:1,row_range:'1-3',variety:'シスコ',status:'growing',seed_date:'2026-05-01'}]})
-    set('farm_pesticides',[{id:1,name:'アグロA',reg_no:'第123号',dilution:1000,preharvest_days:7,max_count:3}])
+    set('farm_pesticides',[{id:1,name:'アグロA',reg_no:'第123号',dilution:1000,preharvest_days:7,max_times:3}])
     set('farm_records',[])
   }, farmId)
   await page.reload({waitUntil:'networkidle2'}); await sleep(1200)
