@@ -40,11 +40,13 @@ function AddFieldModal({ onClose, onAdd, initialLatLng, cropCategories: cats }) 
   const categories = (cats && cats.length > 0) ? cats : _CROP_CATEGORIES
   const defaultCat = categories[0] || INITIAL_CROP_CATEGORIES[0]
   const [name,     setName]     = React.useState('')
+  const [areaName, setAreaName] = React.useState('')   // エリア(例: 上望陀)=GGAP登録圃場リストの区分
   const [catKey,   setCatKey]   = React.useState(defaultCat.key)
   const [cropName, setCropName] = React.useState('')
   const [area,     setArea]     = React.useState('')
   const [address,  setAddress]  = React.useState('')   // 所在地(GAP登録圃場リストで必要)
   const [emaffNo,  setEmaffNo]  = React.useState('')   // eMAFF農地番号(農地一連番号/筆番号)=eMAFF連携キー
+  const [gapTarget, setGapTarget] = React.useState(true) // GGAP認証対象(★)か対象外(NG)か
   const COLORS = ['#0D9972','#2563EB','#EA580C','#7C3AED','#B45309','#DC2626']
   const selectedCat = categories.find(c => c.key === catKey) || defaultCat
   const [color, setColor] = React.useState(selectedCat.color || COLORS[0])
@@ -62,11 +64,13 @@ function AddFieldModal({ onClose, onAdd, initialLatLng, cropCategories: cats }) 
     onAdd({
       id:           Date.now(),
       name:         name.trim(),
+      area_name:    areaName.trim(),
       crop:         cropName.trim() || selectedCat.name,
       crop_category: catKey,
       area_are:     Number(area),
       address:      address.trim(),
       emaff_no:     emaffNo.trim(),
+      gap_target:   gapTarget,
       lat:          initialLatLng ? initialLatLng.lat : 35.385,
       lng:          initialLatLng ? initialLatLng.lng : 139.926,
       status:       '栽培中',
@@ -96,14 +100,24 @@ function AddFieldModal({ onClose, onAdd, initialLatLng, cropCategories: cats }) 
       ),
       // 圃場名
       React.createElement('div', { style:{ marginBottom:'12px' } },
-        React.createElement('label', { style:{ fontSize:'11px', fontWeight:700, color:'#374151', display:'block', marginBottom:'5px', letterSpacing:'.06em', textTransform:'uppercase' } }, '圃場名'),
+        React.createElement('label', { style:{ fontSize:'11px', fontWeight:700, color:'#374151', display:'block', marginBottom:'5px', letterSpacing:'.06em', textTransform:'uppercase' } }, '圃場名（圃場記号）'),
         React.createElement('input', {
           className:'form-input',
-          placeholder:'例: 第21圃場',
+          placeholder:'例: N-2 / 第21圃場',
           value: name,
           onChange: e => setName(e.target.value),
           onKeyDown: e => e.key === 'Enter' && submit(),
           autoFocus: true,
+        })
+      ),
+      // エリア（GGAP登録圃場リストの区分。例: 上望陀）
+      React.createElement('div', { style:{ marginBottom:'12px' } },
+        React.createElement('label', { style:{ fontSize:'11px', fontWeight:700, color:'#374151', display:'block', marginBottom:'5px', letterSpacing:'.06em', textTransform:'uppercase' } }, 'エリア（任意）'),
+        React.createElement('input', {
+          className:'form-input',
+          placeholder:'例: 上望陀',
+          value: areaName,
+          onChange: e => setAreaName(e.target.value),
         })
       ),
       // 作物カテゴリ
@@ -163,6 +177,20 @@ function AddFieldModal({ onClose, onAdd, initialLatLng, cropCategories: cats }) 
         }),
         React.createElement('div', { style:{ fontSize:'10px', color:'#94A3B8', marginTop:'4px', lineHeight:1.5 } },
           'eMAFF農地ナビで各農地に割り振られた番号。入れておくと行政報告CSVで自動的に紐付きます。'
+        )
+      ),
+      // GGAP認証対象（★=対象 / NG=対象外）
+      React.createElement('div', { style:{ marginBottom:'16px' } },
+        React.createElement('label', { style:{ display:'flex', alignItems:'center', gap:'8px', cursor:'pointer', fontSize:'13px', color:'#374151', fontWeight:600 } },
+          React.createElement('input', {
+            type:'checkbox', checked: gapTarget,
+            onChange: e => setGapTarget(e.target.checked),
+            style:{ width:'16px', height:'16px', accentColor:'#0A6B52', cursor:'pointer' }
+          }),
+          'GGAP認証の対象圃場にする'
+        ),
+        React.createElement('div', { style:{ fontSize:'10px', color:'#94A3B8', marginTop:'4px', lineHeight:1.5 } },
+          'GGAP登録圃場リストの ★ に相当。外すと認証対象外（NG）として扱います。'
         )
       ),
       // カラー
@@ -8074,7 +8102,7 @@ function FieldDetailPage({ field, fields, records, pesticides, onSaveRecord, onU
         React.createElement('div', null,
           React.createElement('div', { style:{ fontSize:'18px', fontWeight:700, color:'#111827', lineHeight:1.2 } }, field.name),
           React.createElement('div', { style:{ fontSize:'12px', color:'#64748B', marginTop:'2px' } },
-            field.crop + '　·　' + field.area_are + 'a'
+            (field.area_name ? field.area_name + '　·　' : '') + field.crop + '　·　' + field.area_are + 'a'
           ),
           // 所在地(住所) — 既存圃場にも後から登録/編集できる。GAP登録圃場リストで必要。
           React.createElement('div', { style:{ fontSize:'11px', color:'#6B7280', marginTop:'3px', display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' } },
@@ -8107,6 +8135,14 @@ function FieldDetailPage({ field, fields, records, pesticides, onSaveRecord, onU
                   React.createElement('button', { onClick:()=>{ setEmaffDraft(field.emaff_no||''); setEmaffEditing(true) },
                     style:{ fontSize:11, color:'#0A6B52', background:'none', border:'none', cursor:'pointer', fontWeight:600 } }, field.emaff_no ? '編集' : '登録')
                 )
+          ),
+          // GGAP認証対象（★=対象 / 対象外）— クリックで切替。既定は対象。
+          React.createElement('div', { style:{ fontSize:'11px', color:'#6B7280', marginTop:'3px', display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' } },
+            (field.gap_target === false)
+              ? React.createElement('span', { style:{ color:'#94A3B8' } }, '☆ GGAP認証 対象外')
+              : React.createElement('span', { style:{ color:'#0A6B52', fontWeight:700 } }, '★ GGAP認証 対象'),
+            React.createElement('button', { onClick:()=>{ if(onUpdateField){ const next = !(field.gap_target !== false); onUpdateField({ gap_target: next }); try{ if(typeof showToast==='function') showToast(next?'GGAP認証の対象にしました':'GGAP認証の対象外にしました','success') }catch(e){} } },
+              style:{ fontSize:11, color:'#0A6B52', background:'none', border:'none', cursor:'pointer', fontWeight:600 } }, '切替')
           ),
         ),
         React.createElement('span', { className:'badge ' + statusClass, style:{ marginLeft:'4px' } }, field.status),
@@ -8620,10 +8656,11 @@ function FieldList({ fields, onAdd, onDelete, onUpdateField, mode='full', cropCy
       // ヘッダー行: カラードット + 名前
       React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:'8px' } },
         React.createElement('div', { style:{ width:10, height:10, borderRadius:'50%', background:f.color, flexShrink:0 } }),
-        React.createElement('div', { style:{ fontSize:'14px', fontWeight:700, color:'#1F2937', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' } }, f.name)
+        React.createElement('div', { style:{ fontSize:'14px', fontWeight:700, color:'#1F2937', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' } }, f.name),
+        (f.gap_target === false) && React.createElement('span', { title:'GGAP認証 対象外', style:{ fontSize:'9px', fontWeight:700, color:'#94A3B8', background:'#F1F5F9', border:'1px solid #E2E8F0', borderRadius:4, padding:'1px 5px', flexShrink:0 } }, '対象外')
       ),
-      // 作物 + 面積
-      React.createElement('div', { style:{ fontSize:'12px', color:'#6B7280' } }, cropOf(f) + '　·　' + f.area_are + 'a'),
+      // エリア + 作物 + 面積
+      React.createElement('div', { style:{ fontSize:'12px', color:'#6B7280' } }, (f.area_name ? f.area_name + '　·　' : '') + cropOf(f) + '　·　' + f.area_are + 'a'),
       // フッター: ステータス + 削除
       React.createElement('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:'4px' } },
         React.createElement('span', { className:'badge ' + (f.status==='栽培中'?'badge-green':f.status==='休閑'?'badge-gray':f.status==='収穫期'?'badge-amber':'badge-blue') }, f.status),

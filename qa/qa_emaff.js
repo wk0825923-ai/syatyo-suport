@@ -94,13 +94,17 @@ const expand=(page)=>page.evaluate(()=>{const b=[...document.querySelectorAll('b
 
   // ① AddFieldModal に eMAFF農地番号入力欄
   await sleep(400); await expand(page); await sleep(200)
-  await clickText(page,'圃場管理'); await sleep(600)
+  await clickText(page,'圃場管理'); await sleep(500)
+  await clickText(page,'圃場一覧へ'); await sleep(600)   // 追加ボタンは圃場一覧ページにある
   R.addModal = await page.evaluate(()=>{
-    const btn=[...document.querySelectorAll('button')].find(b=>/圃場を追加|新規圃場|圃場追加|\+ 圃場/.test(b.textContent)&&b.offsetParent)
+    const btn=[...document.querySelectorAll('button')].find(b=>/圃場を追加|新規圃場|圃場追加/.test(b.textContent)&&b.offsetParent)
     if(btn)btn.click()
     return new Promise(res=>setTimeout(()=>{
-      const t=document.body.innerText
-      res({ hasEmaffInput:/eMAFF農地番号|農地一連番号|農地番号/.test(t), hasAddress:/所在地|住所/.test(t), hasNavLink:/農地ナビ|eMAFF/.test(t) })
+      // 実際に開いた position:fixed モーダルの中身だけを見る（ページ本文の誤検出を防ぐ）
+      const ov=[...document.querySelectorAll('div')].find(d=>d.style&&d.style.position==='fixed'&&/圃場を追加/.test(d.textContent))
+      const t=ov?ov.innerText:''
+      res({ modalOpen:!!ov, hasEmaffInput:/eMAFF農地番号|農地一連番号/i.test(t), hasAddress:/所在地|住所/.test(t), hasNavLink:/農地ナビ/.test(t),
+        hasArea:/エリア/.test(t), hasGgapTarget:/GGAP認証の対象圃場/.test(t), hasCheckbox:!!(ov&&ov.querySelector('input[type=checkbox]')) })
     },500))
   })
   // モーダルを閉じる
@@ -143,6 +147,8 @@ const expand=(page)=>page.evaluate(()=>{const b=[...document.querySelectorAll('b
     ['確認: 出力/キャンセルボタン', R.confirm&&R.confirm.hasOkCancel===true],
     ['確認: キャンセルで未ダウンロード', R.confirm&&R.confirm.downloadedAfterCancel===false],
     ['圃場追加: eMAFF入力欄あり', R.addModal&&R.addModal.hasEmaffInput===true],
+    ['圃場追加: エリア入力欄あり', R.addModal&&R.addModal.hasArea===true],
+    ['圃場追加: GGAP対象チェックあり', R.addModal&&R.addModal.hasGgapTarget===true&&R.addModal.hasCheckbox===true],
     ['帳票: eMAFF CSVボタンあり', R.exportBtn&&R.exportBtn.hasEmaffCsvBtn===true],
     ['巡回: 異常表示なし', R.pageScan.every(x=>!x.bad)],
     ['JSエラーなし', errors.length===0],
