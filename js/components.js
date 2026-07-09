@@ -591,14 +591,14 @@ function FarmIntegrityPage(props) {
       ? (hasCheckableData
           // 記録があって、かつ不整合なし＝本当にクリーン
           ? React.createElement('div', { style:{ background:'#ECFDF5', border:'1px solid #A7F3D0', borderRadius:14, padding:'32px 20px', textAlign:'center' } },
-              React.createElement('div', { style:{ fontSize:40, marginBottom:8 } }, '✅'),
+              React.createElement('i', { className:'ti ti-circle-check', 'aria-hidden':'true', style:{ fontSize:44, color:'#0D9972', marginBottom:8, display:'block' } }),
               React.createElement('div', { style:{ fontSize:16, fontWeight:800, color:'#065F46', marginBottom:4 } }, '食い違いは見つかりませんでした'),
               React.createElement('div', { style:{ fontSize:13, color:'#4B5563' } }, '記録同士の突合せで、要対応の不整合はありません。')
             )
           // 記録がまだ無い＝点検対象が無いだけ。初見の人が「点検された」と誤解しないよう明示。
           : React.createElement('div', { style:{ background:'#F8FAFC', border:'1px solid #E2E8F0', borderRadius:14, padding:'28px 22px' } },
               React.createElement('div', { style:{ textAlign:'center', marginBottom:18 } },
-                React.createElement('div', { style:{ fontSize:38, marginBottom:8 } }, '📋'),
+                React.createElement('i', { className:'ti ti-checkup-list', 'aria-hidden':'true', style:{ fontSize:42, color:'#94A3B8', marginBottom:8, display:'block' } }),
                 React.createElement('div', { style:{ fontSize:16, fontWeight:800, color:'#334155', marginBottom:4 } }, 'まだ点検できる記録がありません'),
                 React.createElement('div', { style:{ fontSize:13, color:'#64748B' } }, '日報や農薬・収穫の記録を入力すると、ここで自動的に食い違いを点検します。')
               ),
@@ -9077,7 +9077,7 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
     return React.createElement('div', { style:wrap },
       headerEl,
       React.createElement('div', { style:{ ...card, textAlign:'center', padding:'56px 24px' } },
-        React.createElement('div', { style:{ fontSize:40, marginBottom:12 } }, '🌱'),
+        React.createElement('i', { className:'ti ti-plant-2', 'aria-hidden':'true', style:{ fontSize:44, color:'#0D9972', marginBottom:12, display:'block' } }),
         React.createElement('div', { style:{ fontSize:15, fontWeight:700, color:'#374151', marginBottom:6 } }, 'まだロットがありません'),
         React.createElement('div', { style:{ fontSize:13, color:'#6B7280', lineHeight:1.7, maxWidth:520, margin:'0 auto' } },
           '圃場詳細から定植日報を入力するとロットが自動生成され、以降の農薬散布・施肥・収穫記録がこのページにロット単位で自動集約されます。'),
@@ -9371,7 +9371,7 @@ function HarvestForecastPage({ fields, farmLots, harvestRecords, cropCategories,
   let body
   if (rows.length === 0) {
     body = React.createElement('div', { style:{ ...card, textAlign:'center', padding:'56px 24px' } },
-      React.createElement('div', { style:{ fontSize:40, marginBottom:12 } }, '🌾'),
+      React.createElement('i', { className:'ti ti-temperature', 'aria-hidden':'true', style:{ fontSize:44, color:'#0D9972', marginBottom:12, display:'block' } }),
       React.createElement('div', { style:{ fontSize:15, fontWeight:700, color:'#374151', marginBottom:6 } }, '栽培中のロットがありません'),
       React.createElement('div', { style:{ fontSize:13, color:'#6B7280', lineHeight:1.7, maxWidth:520, margin:'0 auto' } },
         '定植日報を入力するとロットが自動生成され、収穫前（栽培中・収穫待ち）のロットがここに予測付きで並びます。'),
