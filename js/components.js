@@ -7945,8 +7945,12 @@ function FieldDetailPage({ field, fields, records, pesticides, onSaveRecord, onU
   // 【実装手順書 C】担当者連携
   staff,
   // 【畝ロット管理】動的ロット + CRUD（旧・静的LOTSの置き換え）
-  lots, onAddLot, onUpdateLot, onDeleteLot }) {
+  lots, onAddLot, onUpdateLot, onDeleteLot,
+  onUpdateField }) {
   const fieldRecords = records.filter(r => r.field_id === field.id)
+  // 所在地(住所)のインライン編集。既存圃場に後から住所を入れられるように。
+  const [addrEditing, setAddrEditing] = React.useState(false)
+  const [addrDraft, setAddrDraft]     = React.useState('')
   const fieldRows    = lots || []
   const [selectedRowNo, setSelectedRowNo] = React.useState(null)
 
@@ -8054,6 +8058,22 @@ function FieldDetailPage({ field, fields, records, pesticides, onSaveRecord, onU
           React.createElement('div', { style:{ fontSize:'18px', fontWeight:700, color:'#111827', lineHeight:1.2 } }, field.name),
           React.createElement('div', { style:{ fontSize:'12px', color:'#64748B', marginTop:'2px' } },
             field.crop + '　·　' + field.area_are + 'a'
+          ),
+          // 所在地(住所) — 既存圃場にも後から登録/編集できる。GAP登録圃場リストで必要。
+          React.createElement('div', { style:{ fontSize:'11px', color:'#6B7280', marginTop:'3px', display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' } },
+            addrEditing
+              ? React.createElement(React.Fragment, null,
+                  React.createElement('input', { autoFocus:true, value:addrDraft, onChange:e=>setAddrDraft(e.target.value), placeholder:'例: 千葉県木更津市○○ 123-4',
+                    style:{ fontSize:'12px', padding:'3px 7px', border:'1px solid #D8E4D8', borderRadius:5, width:'230px', outline:'none' } }),
+                  React.createElement('button', { onClick:()=>{ if(onUpdateField) onUpdateField({ address: addrDraft.trim() }); setAddrEditing(false); try{ if(typeof showToast==='function') showToast('所在地を保存しました','success') }catch(e){} },
+                    style:{ fontSize:11, fontWeight:700, color:'#fff', background:'#0A6B52', border:'none', borderRadius:5, padding:'3px 10px', cursor:'pointer' } }, '保存'),
+                  React.createElement('button', { onClick:()=>setAddrEditing(false), style:{ fontSize:11, color:'#6B7280', background:'none', border:'none', cursor:'pointer' } }, '取消')
+                )
+              : React.createElement(React.Fragment, null,
+                  field.address ? React.createElement('span', null, '📍 ' + field.address) : React.createElement('span', { style:{ color:'#94A3B8' } }, '📍 所在地 未登録'),
+                  React.createElement('button', { onClick:()=>{ setAddrDraft(field.address||''); setAddrEditing(true) },
+                    style:{ fontSize:11, color:'#0A6B52', background:'none', border:'none', cursor:'pointer', fontWeight:600 } }, field.address ? '編集' : '登録')
+                )
           ),
         ),
         React.createElement('span', { className:'badge ' + statusClass, style:{ marginLeft:'4px' } }, field.status),

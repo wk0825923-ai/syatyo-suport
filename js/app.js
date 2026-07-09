@@ -535,6 +535,8 @@
           onChangeDestinations: setShipmentDestinations,
           // 【実装手順書 C】担当者連携
           staff,
+          // 圃場情報(所在地など)の更新。既存圃場に後から住所を入れられるように。
+          onUpdateField: patch => setFields(p => p.map(f => f.id === field.id ? { ...f, ...patch } : f)),
           sub
         })
       : (pageMap.dashboard)()
