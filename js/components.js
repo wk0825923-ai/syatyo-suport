@@ -3198,7 +3198,7 @@ function StepBar({ step, steps }) {
 }
 
 // ── ステップ1: 日付・圃場・天気・作業者 ────────────
-function RecordStep1({ form, fields, up, onNext, isFieldPreset, recentFieldIds }) {
+function RecordStep1({ form, fields, up, onNext, isFieldPreset, recentFieldIds, hasWeatherHistory }) {
   const WEATHERS = [{ v:'晴', icon:'☀️' }, { v:'曇', icon:'🌤' }, { v:'雨', icon:'🌧' }, { v:'強風', icon:'💨' }]
   const [fieldQuery, setFieldQuery] = React.useState('')  // 圃場が多い時の検索
 
@@ -3345,7 +3345,11 @@ function RecordStep1({ form, fields, up, onNext, isFieldPreset, recentFieldIds }
 
     // ── 天気 ──
     React.createElement('div', { className:'form-group' },
-      React.createElement('label', { className:'form-label' }, '天気'),
+      React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' } },
+        React.createElement('label', { className:'form-label', style:{ margin:0 } }, '天気'),
+        // 【P4】直近の記録から候補を入れている旨を明示（変更できる）
+        hasWeatherHistory && React.createElement('span', { style:{ fontSize:'10.5px', fontWeight:700, color:'#0A6B52', background:'#ECFDF5', border:'1px solid #A7F3D0', borderRadius:'10px', padding:'1px 8px' } }, '候補：前回の天気（変更可）')
+      ),
       React.createElement('div', { style:{ display:'flex', gap:'8px' } },
         ...WEATHERS.map(w =>
           React.createElement('button', {
@@ -4601,10 +4605,24 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
   }, [records])
   const lastFieldId = (!isFieldPreset && recentFieldIds.length && fields.some(f => f.id === recentFieldIds[0])) ? String(recentFieldIds[0]) : ''
   const initFieldId = presetFieldId || lastFieldId
+  // 【P4: 天気の自動候補】その日の天気は決まっているので、初期値を直近の記録の天気にする。
+  // 同じ日に既に記録があればその日の天気を優先。無ければ最新記録の天気、いずれも無ければ '晴'。
+  const weatherByDate = React.useMemo(() => {
+    const m = {}
+    ;(records || []).forEach(r => { if (r.date && r.weather && !m[r.date]) m[r.date] = r.weather })
+    return m
+  }, [records])
+  const latestWeather = React.useMemo(() => {
+    const s = [...(records || [])].filter(r => r.weather)
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || (Number(b.id) || 0) - (Number(a.id) || 0))
+    return s[0] ? s[0].weather : ''
+  }, [records])
+  const hasWeatherHistory = !!latestWeather
+  const suggestedWeather = weatherByDate[todayYmd()] || latestWeather || '晴'
   const [form, setForm]         = React.useState({
     date: todayYmd(),
     field_id: initFieldId, field_ids: initFieldId ? [Number(initFieldId)] : [], work_type: '', pesticide_id: '',
-    amount: '', weather: '晴', worker: savedWorker, note: '', checks: {},
+    amount: '', weather: suggestedWeather, worker: savedWorker, note: '', checks: {},
     start_time: '08:00', end_time: '17:00', break_minutes: 60,
     spray_method: '',       // 使用方法（散布・株元散布・土壌混和・灌注）
     machine_no: '',         // 使用機械No.
@@ -4634,7 +4652,19 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
   // UX-10: 保存後の「続けて入力」ボタン用 state
   // 多重送信ガード用（保存ボタン連打で二重登録を防ぐ）。フォーム編集で解除。
   const savingRef = React.useRef(false)
-  const updateField = (k, v) => { savingRef.current = false; setForm(f => ({ ...f, [k]: v })) }
+  // 【P4】天気を手動で選んだら以降は日付追従を止める（勝手に上書きしないため）
+  const weatherTouchedRef = React.useRef(false)
+  const updateField = (k, v) => {
+    savingRef.current = false
+    if (k === 'weather') weatherTouchedRef.current = true
+    // 日付を変えたら、その日に既に記録があればその日の天気を候補として追従（手動選択までの間だけ）
+    if (k === 'date' && !weatherTouchedRef.current) {
+      const w = weatherByDate[v]
+      setForm(f => ({ ...f, date: v, weather: w || f.weather }))
+      return
+    }
+    setForm(f => ({ ...f, [k]: v }))
+  }
 
   // 下書き自動保存（意味のある入力がある時だけ書く。空に戻したら下書きも消す）
   React.useEffect(() => {
@@ -4738,7 +4768,7 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
   // CAT-04-2: stepComponents を useMemo でメモ化
   // → step/form/fields 等が変わった時だけ再生成され、無関係な再レンダーで再マウントされない
   const stepComponents = React.useMemo(() => [null,
-    () => React.createElement(RecordStep1, { form, fields, up:updateField, onNext:()=>setStep(2), isFieldPreset, recentFieldIds }),
+    () => React.createElement(RecordStep1, { form, fields, up:updateField, onNext:()=>setStep(2), isFieldPreset, recentFieldIds, hasWeatherHistory }),
     () => React.createElement(RecordStep2, { form, up:updateField, onPrev:()=>setStep(1), onNext:()=>setStep(3), onAddPhoto:handleAddPhoto, onRemovePhoto:handleRemovePhoto, photoError }),
     () => React.createElement(RecordStep3, { form, up:updateField, pesticides, records, lotSprayRecords, isOver, selField, handlePesticideUpdate, onPrev:()=>setStep(2), onNext:()=>setStep(4) }),
     () => React.createElement(RecordStep4, { form, dilution, selField, selP, isOver, onPrev:()=>setStep(3), onSave:handleSave, showContinueButton, onContinue:handleContinueInput }),
@@ -4756,7 +4786,7 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
       (form.field_ids && form.field_ids.length > 1) ? React.createElement('span', { style:{ fontSize:12, color:'#B45309' } }, '※畝の記録は主圃場のみ') : null
     )
     let el
-    if (kind === 'spray')     el = React.createElement(LotSprayRecordForm,    { field:selField, pesticides:pesticides||[], lots, staff, onCancel:backToStep2, onSave:(r)=>{ onSaveLotSpray(r); clearDraft(); setDraftSaved(false); backToStep2() } })
+    if (kind === 'spray')     el = React.createElement(LotSprayRecordForm,    { field:selField, pesticides:pesticides||[], lots, staff, defaultWeather:suggestedWeather, onCancel:backToStep2, onSave:(r)=>{ onSaveLotSpray(r); clearDraft(); setDraftSaved(false); backToStep2() } })
     else if (kind === 'fert') el = React.createElement(TopDressingRecordForm, { field:selField, fertilizers:fertilizers||[], lots, staff, onCancel:backToStep2, onSave:(r)=>{ onSaveTopDressing(r); clearDraft(); setDraftSaved(false); backToStep2() } })
     else                      el = React.createElement(HarvestRecordForm,     { field:selField, lots, destinations:destinations||[], harvestRecords:harvestRecords||[], staff, onCancel:backToStep2, onSave:(r)=>{ onSaveHarvest(r); clearDraft(); setDraftSaved(false) } })
     return React.createElement('div', null, header, el)
@@ -6005,9 +6035,9 @@ function FieldDashboardSection({ field, fieldRecords, fieldRows, pesticides, lot
 //   lots がない圃場 → 従来のテキスト入力のみ（フォールバック）
 //   両モード共存: 畝マップ下部に手動入力欄も常時表示（微調整用）
 // ─────────────────────────────────────────────────────
-function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff }) {
+function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff, defaultWeather }) {
   const [date, setDate]               = React.useState(todayYmd())
-  const [weather, setWeather]         = React.useState('')  // 天気（薬剤散布記録シートの「天気」列に対応）
+  const [weather, setWeather]         = React.useState(defaultWeather || '')  // 天気（薬剤散布記録シートの「天気」列に対応・P4で直近の記録から既定候補）
   const [selectedRows, setSelectedRows] = React.useState(new Set())  // 畝マップ選択セット
   const [rowRange, setRowRange]       = React.useState('')            // テキスト入力（フォールバック・手動調整用）
   const [sprayVolume, setSprayVolume] = React.useState('')
