@@ -4310,7 +4310,7 @@ function RecordTable({ records, fields, pesticides, onUpdate, onDelete, cropCycl
         ? React.createElement('div', {
             style:{ padding:'36px 24px', color:'#6B7280', fontSize:'14px', textAlign:'center' }
           },
-            React.createElement('div', { style:{ fontSize:'32px', marginBottom:'8px' } }, '🔍'),
+            React.createElement('i', { className:'ti ti-' + (hasFilter ? 'search' : 'list-details'), 'aria-hidden':'true', style:{ fontSize:38, color:'#94A3B8', marginBottom:8, display:'block' } }),
             hasFilter
               ? React.createElement('div', null,
                   React.createElement('div', { style:{ fontWeight:500, color:'#374151' } }, '該当する記録が見つかりません'),
