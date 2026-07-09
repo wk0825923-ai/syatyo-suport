@@ -20,6 +20,7 @@ const NAV_SECTIONS_DATA = [
   { id:'crop_plan',        label:'作付計画 / 経営予測', icon:'calendar-event' },  // 季節ごと
   { id:'export',           label:'GAP帳票出力',         icon:'file-export'    },  // 監査時
   { id:'gap',              label:'GAPチェックリスト',   icon:'checklist'      },  // 監査時
+  { id:'gap_documents',    label:'必要書類・文書台帳',  icon:'folders'        },  // GAP原則ごとの必要文書の整備状況
   { id:'integrity_check',  label:'整合性チェック',      icon:'checkup-list'   },  // 突合せ: 入力ミス/食い違いを点検
 ]
 // マスタ・設定系をまとめる（見出しは「管理・設定」・既定で折りたたみ）。初期設定中心で頻度は低い。
@@ -10750,6 +10751,93 @@ function GapExportHero({ done, total, pct, sprayCount, onGenerateAll, isGenerati
       isGenerating ? '生成中...' : (justCompleted ? '3点の書類が完成しました' : '書類パッケージを生成する')
     ),
     React.createElement('style',null,'@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}')
+  )
+}
+
+// ── GapDocumentRegistry: 必要書類ナビ ＋ 文書管理台帳 ───────────
+// 中川農園「01_必要文書一覧」の実データ(36文書)を、GAP原則ごとに整備状況で管理する。
+// 「どのGAP項目に何の書類が要るか」で今福さんが迷わないようにする。整備済み/更新日/メモを永続化。
+function GapDocumentRegistry({ gap, docsState, onUpdateDoc }) {
+  const checks = (gap && gap.length) ? gap : INITIAL_GAP_CHECKS
+  const docs   = INITIAL_GAP_DOCUMENTS
+  const state  = docsState || {}                                  // { [docId]: {ready, updated, note} }（Appで農場スコープ永続化）
+  const [filter, setFilter] = React.useState('all')               // 'all' | 'todo'
+
+  const readyCount = docs.filter(d => state[d.id] && state[d.id].ready).length
+  const pct = docs.length ? Math.round(readyCount / docs.length * 100) : 0
+
+  const groups = {}
+  docs.forEach(d => { (groups[d.smart] = groups[d.smart] || []).push(d) })
+  const smartKeys = Object.keys(groups).sort((a, b) =>
+    a === 'common' ? 1 : b === 'common' ? -1 : Number(a) - Number(b))
+
+  const update = (id, patch) => { if (onUpdateDoc) onUpdateDoc(id, patch) }
+  const dispName = (f) => f.replace(/^[0-9]{2}_/, '').replace(/^★/, '')
+
+  return React.createElement('div', { className:'page' },
+    React.createElement('div', { style:{ marginBottom:'6px' } },
+      React.createElement('div', { className:'eyebrow' }, 'GAP DOCUMENT REGISTRY'),
+      React.createElement('div', { className:'page-title' }, '必要書類ナビ / 文書管理台帳'),
+      React.createElement('div', { className:'page-sub' }, '中川農園の必要文書一覧（実データ36文書）をGAP項目ごとに整備状況で管理します')
+    ),
+    // 進捗＋フィルタ
+    React.createElement('div', { className:'card', style:{ marginBottom:'16px', display:'flex', alignItems:'center', gap:'20px', flexWrap:'wrap' } },
+      React.createElement('div', { style:{ flex:1, minWidth:'220px' } },
+        React.createElement('div', { className:'prog-label' },
+          React.createElement('span', null, '整備状況（' + readyCount + '/' + docs.length + '文書）'),
+          React.createElement('span', { style:{ color:'#0D9972', fontWeight:600 } }, pct + '%')
+        ),
+        React.createElement('div', { className:'prog-bg', style:{ height:'10px' } },
+          React.createElement('div', { className:'prog-fill', style:{ width:pct + '%' } })
+        )
+      ),
+      React.createElement('div', { style:{ display:'flex', gap:'6px', flexShrink:0 } },
+        ...[['all','すべて'],['todo','未整備のみ']].map(([k,lab]) =>
+          React.createElement('button', {
+            key:k, onClick:()=>setFilter(k),
+            className:'btn ' + (filter===k?'btn-primary':'btn-ghost'),
+            style: filter===k ? {} : { borderColor:'#0D9972', color:'#0D9972' }
+          }, lab)
+        )
+      )
+    ),
+    // 原則ごとの書類
+    ...smartKeys.map(smart => {
+      const list = groups[smart].filter(d => filter==='all' || !(state[d.id] && state[d.id].ready))
+      if (!list.length) return null
+      const cat = gapCategoryForSmart(smart, checks)
+      const label = smart === 'common' ? '共通（全体）' : ('FV-Smart ' + smart + (cat ? '　' + cat : ''))
+      const grpReady = groups[smart].filter(d => state[d.id] && state[d.id].ready).length
+      return React.createElement('div', { key:smart, className:'card', style:{ marginBottom:'12px', padding:'14px 18px' } },
+        React.createElement('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' } },
+          React.createElement('div', { style:{ fontSize:'13px', fontWeight:700, color:'#0A6B52' } }, label),
+          React.createElement('span', { className:'badge ' + (grpReady===groups[smart].length?'badge-green':'badge-amber') }, grpReady + '/' + groups[smart].length + ' 整備')
+        ),
+        ...list.map(d => {
+          const st = state[d.id] || {}
+          return React.createElement('div', { key:d.id, style:{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 0', borderTop:'1px solid #F1F5F9', flexWrap:'wrap' } },
+            React.createElement('label', { style:{ display:'flex', alignItems:'center', gap:'8px', cursor:'pointer', flex:1, minWidth:'220px' } },
+              React.createElement('input', { type:'checkbox', checked:!!st.ready,
+                onChange:e=>{ update(d.id, { ready:e.target.checked, updated: e.target.checked ? (st.updated || new Date().toISOString().slice(0,10)) : st.updated }); },
+                style:{ width:'16px', height:'16px', accentColor:'#0A6B52', cursor:'pointer', flexShrink:0 } }),
+              React.createElement('span', { style:{ fontSize:'13px', color: st.ready ? '#0A6B52' : '#374151', fontWeight: st.ready ? 600 : 500 } }, dispName(d.file))
+            ),
+            React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:'6px', flexShrink:0 } },
+              React.createElement('span', { style:{ fontSize:'10px', color:'#94A3B8' } }, '更新日'),
+              React.createElement('input', { type:'date', value: st.updated || '',
+                onChange:e=>update(d.id, { updated:e.target.value }),
+                style:{ fontSize:'11px', padding:'3px 6px', border:'1px solid #E2E8F0', borderRadius:5, color:'#475569' } })
+            ),
+            React.createElement('input', { type:'text', placeholder:'メモ（保管場所・担当など）', value: st.note || '',
+              onChange:e=>update(d.id, { note:e.target.value }),
+              style:{ fontSize:'11px', padding:'4px 8px', border:'1px solid #E2E8F0', borderRadius:5, width:'180px', flexShrink:0 } })
+          )
+        })
+      )
+    }),
+    React.createElement('div', { style:{ fontSize:'11px', color:'#94A3B8', marginTop:'8px', lineHeight:1.6 } },
+      '※ 一覧は中川農園「01_必要文書一覧」の実データに基づく雛形です。書類そのものはこのシステムには保存せず、整備状況・更新日・保管場所メモだけを管理します。'
+    )
   )
 }
 

@@ -54,6 +54,7 @@
   // 【実装手順書 A】技能実習生日誌
   const [traineeDiaries, setTraineeDiaries] = useFPS('farm_trainee_diaries', [])
   const [gap,       setGap]      = useFPS('farm_gap',        INITIAL_GAP_CHECKS)
+  const [gapDocs,   setGapDocs]  = useFPS('farm_gap_documents', {})  // 文書管理台帳: { [docId]: {ready,updated,note} }
   const [rentals,   setRentals]  = useFPS('farm_rentals',    INITIAL_RENTALS)
   const [cropPlans, setCropPlans]= useFPS('farm_crop_plans', INITIAL_CROP_PLANS)
   const [todayTasks, setTodayTasks] = useFPS('farm_today_tasks', INITIAL_TODAY_TASKS)
@@ -421,6 +422,8 @@
     fields:            () => React.createElement(FieldTablePage, { fields, onAdd:f=>{setFields(p=>[...p,f]);celebrateSave('圃場を追加！')}, onDelete:id=>setFields(p=>p.filter(f=>f.id!==id)), cropCycles, onNavigate:setPage, cropCategories }),
     crop_plan:         () => React.createElement(CropPlan,    { fields, plans:cropPlans, records, pesticides, onAdd:p=>{setCropPlans(prev=>[...prev,p]);celebrateSave('作付計画を追加！')}, onDelete:id=>setCropPlans(prev=>prev.filter(p=>p.id!==id)) }),
     gap:               () => React.createElement(GapChecklist, { gap, onToggle:id=>setGap(p=>p.map(c=>c.id===id?{...c,is_cleared:!c.is_cleared}:c)), ctx:{ records, lotSprayRecords, pesticides, pesticidePurchases, topDressingRecords, fertilizerPurchases, harvestRecords, shipmentRecords, maintenanceRecords, staff, farmLots, fields } }),
+    // 【必要書類ナビ/文書管理台帳】GAP原則ごとに必要文書(実データ36)の整備状況を管理
+    gap_documents:     () => React.createElement(GapDocumentRegistry, { gap, docsState:gapDocs, onUpdateDoc:(id,patch)=>setGapDocs(s=>({ ...s, [id]:{ ...(s[id]||{}), ...patch } })) }),
     // 【突合せ】記録の食い違い・入力ミスを横断点検（原因と対処つき）
     integrity_check:   () => React.createElement(FarmIntegrityPage, { records, lotSprayRecords, topDressingRecords, harvestRecords, shipmentRecords, farmLots, fields, pesticides, fertilizers, pesticideStock, pesticidePurchases, fertilizerStock, fertilizerPurchases, onNavigate:navigateTo }),
     gap_package:       () => React.createElement(GapExport,   { gap, onToggle:id=>setGap(p=>p.map(c=>c.id===id?{...c,is_cleared:!c.is_cleared}:c)), records, fields, pesticides, ctx:{ records, lotSprayRecords, pesticides, pesticidePurchases, topDressingRecords, fertilizerPurchases, harvestRecords, shipmentRecords, maintenanceRecords, staff, farmLots, fields } }),

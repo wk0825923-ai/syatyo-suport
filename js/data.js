@@ -857,6 +857,59 @@ const INITIAL_GAP_CHECKS = [
   { id:218, code:"McD 11.1.1", category:"McD: データアクセス", item:"CB は、PLUS データ・アクセス・ルールを生産者に伝え、生産者がそれを受け入れたことを証明し、最新版の「サブライ センスおよび認証契約書」を受け入れ、生産者が署名している必要があります。", schemes:["McD"], is_cleared:false, doc:"データアクセス規則" },
 ]
 
+// ============================================================================
+// GAP必要文書マスタ（中川農園「01_必要文書一覧」の実データ準拠・全36文書）
+//   smart: 対応するFV-Smart原則の2桁番号（GAPチェックリストの code 先頭2桁と一致）。
+//          'common' はGGAP全体にまたがる共通文書。
+//   これを「必要書類ナビ／文書管理台帳」で、原則ごとに整備状況を管理する土台にする。
+// ============================================================================
+const INITIAL_GAP_DOCUMENTS = [
+  { id:1,  no:1,  file:"01_文書管理の規定",                          smart:"01" },
+  { id:2,  no:2,  file:"01_必要文書一覧",                            smart:"01" },
+  { id:3,  no:3,  file:"02_継続的改善計画",                          smart:"02" },
+  { id:4,  no:4,  file:"03_組織図",                                  smart:"03" },
+  { id:5,  no:5,  file:"03_作業別一覧",                              smart:"03" },
+  { id:6,  no:6,  file:"03_衛生リスク評価表",                        smart:"03" },
+  { id:7,  no:7,  file:"03_労働安全リスク評価表",                    smart:"03" },
+  { id:8,  no:8,  file:"04_外部委託覚書",                            smart:"04" },
+  { id:9,  no:9,  file:"05_供給業者仕様書",                          smart:"05" },
+  { id:10, no:10, file:"05_在庫表（肥料・農薬）",                    smart:"05" },
+  { id:11, no:11, file:"07_出荷手順書",                              smart:"07" },
+  { id:12, no:12, file:"07_出荷手順",                                smart:"07" },
+  { id:13, no:13, file:"07_徳島サリナス⇔マルマサの覚書（捺印）",     smart:"07" },
+  { id:14, no:14, file:"07_覚書（GGN記載なし）",                     smart:"07" },
+  { id:15, no:15, file:"10_労働者が申し立てを出来る仕組みがある",     smart:"05" },
+  { id:16, no:16, file:"15_フードディフェンスに関するリスク評価",     smart:"10" },
+  { id:17, no:17, file:"16_食品偽装に関するリスク評価",              smart:"16" },
+  { id:18, no:18, file:"★徳島サリナス 農場管理マニュアル",          smart:"common" },
+  { id:19, no:19, file:"21_圃場カルテ",                              smart:"21" },
+  { id:20, no:20, file:"22_生物多様性の保護と増進",                  smart:"22" },
+  { id:21, no:21, file:"23_エネルギーモニタリング",                  smart:"23" },
+  { id:22, no:22, file:"23_エネルギー効率改善計画",                  smart:"23" },
+  { id:23, no:23, file:"25_廃棄物管理プラン",                        smart:"25" },
+  { id:24, no:24, file:"★圃場管理表（原本）Ver2.2",                 smart:"common" },
+  { id:25, no:25, file:"29_有機質肥料のリスク検討表",                smart:"29" },
+  { id:26, no:26, file:"29_肥料の袋写し",                            smart:"29" },
+  { id:27, no:27, file:"30_使用水の汚染に対するリスク評価",          smart:"30" },
+  { id:28, no:28, file:"★水質ガイドライン ver2.0",                  smart:"common" },
+  { id:29, no:29, file:"31_IPMの計画",                              smart:"31" },
+  { id:30, no:30, file:"31_IPM実践計画書",                          smart:"31" },
+  { id:31, no:31, file:"★圃場管理表（原本）Ver2.2 No.2",           smart:"common" },
+  { id:32, no:32, file:"32_農薬散布マニュアル",                      smart:"32" },
+  { id:33, no:33, file:"32_残留農薬サンプリング実施記録",            smart:"32" },
+  { id:34, no:34, file:"32_未承認農薬が検出された際の手順",          smart:"32" },
+  { id:35, no:35, file:"33_トイレ掃除チェックシート",                smart:"33" },
+  { id:36, no:36, file:"33_冷蔵庫内温度チェックシート",              smart:"33" },
+]
+
+// smart番号 → GAP原則カテゴリ名（チェックリストの code 先頭2桁から解決）。
+// 例: '03' → 'リソース管理及びトレーニング'。該当なしは null。
+function gapCategoryForSmart(smart, checks) {
+  if (smart === 'common') return '共通（全体）'
+  const hit = (checks || INITIAL_GAP_CHECKS).find(c => typeof c.code === 'string' && c.code.indexOf(smart + '.') === 0)
+  return hit ? hit.category : null
+}
+
 // GAP項目の自動達成判定: システムに該当記録があれば true（人手のチェック不要にする）。
 // ctx = { records, lotSprayRecords, pesticides, pesticidePurchases, topDressingRecords,
 //         fertilizerPurchases, harvestRecords, shipmentRecords, maintenanceRecords, staff, farmLots }
