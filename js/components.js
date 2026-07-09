@@ -4790,7 +4790,7 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
       (form.field_ids && form.field_ids.length > 1) ? React.createElement('span', { style:{ fontSize:12, color:'#B45309' } }, '※畝の記録は主圃場のみ') : null
     )
     let el
-    if (kind === 'spray')     el = React.createElement(LotSprayRecordForm,    { field:selField, pesticides:pesticides||[], lots, staff, defaultWeather:suggestedWeather, onCancel:backToStep2, onSave:(r)=>{ onSaveLotSpray(r); clearDraft(); setDraftSaved(false); backToStep2() } })
+    if (kind === 'spray')     el = React.createElement(LotSprayRecordForm,    { field:selField, pesticides:pesticides||[], lots, staff, defaultWeather:suggestedWeather, pastSprays:lotSprayRecords||[], onCancel:backToStep2, onSave:(r)=>{ onSaveLotSpray(r); clearDraft(); setDraftSaved(false); backToStep2() } })
     else if (kind === 'fert') el = React.createElement(TopDressingRecordForm, { field:selField, fertilizers:fertilizers||[], lots, staff, onCancel:backToStep2, onSave:(r)=>{ onSaveTopDressing(r); clearDraft(); setDraftSaved(false); backToStep2() } })
     else                      el = React.createElement(HarvestRecordForm,     { field:selField, lots, destinations:destinations||[], harvestRecords:harvestRecords||[], staff, onCancel:backToStep2, onSave:(r)=>{ onSaveHarvest(r); clearDraft(); setDraftSaved(false) } })
     return React.createElement('div', null, header, el)
@@ -6039,7 +6039,17 @@ function FieldDashboardSection({ field, fieldRecords, fieldRows, pesticides, lot
 //   lots がない圃場 → 従来のテキスト入力のみ（フォールバック）
 //   両モード共存: 畝マップ下部に手動入力欄も常時表示（微調整用）
 // ─────────────────────────────────────────────────────
-function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff, defaultWeather }) {
+function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff, defaultWeather, pastSprays }) {
+  // 【P6 次回防除リマインド】この圃場で各農薬を前回撒いた日→経過日数を出し、撒き過ぎ/間隔の判断を助ける。
+  const lastSprayFor = (pid) => {
+    if (!pid) return null
+    const hits = (pastSprays || []).filter(r => r.field_id === field.id && (r.pesticides || []).some(p => Number(p.pesticide_id) === Number(pid)) && r.date)
+    if (!hits.length) return null
+    hits.sort((a, b) => String(b.date).localeCompare(String(a.date)))
+    const last = hits[0].date
+    const days = Math.round((new Date(todayYmd()) - new Date(last)) / 86400000)
+    return { last, days: Number.isFinite(days) ? days : null }
+  }
   const [date, setDate]               = React.useState(todayYmd())
   const [weather, setWeather]         = React.useState(defaultWeather || '')  // 天気（薬剤散布記録シートの「天気」列に対応・P4で直近の記録から既定候補）
   const [selectedRows, setSelectedRows] = React.useState(new Set())  // 畝マップ選択セット
@@ -6228,6 +6238,23 @@ function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff, 
               style:{ background:'none', border:'none', color:'#94A3B8', cursor:'pointer', fontSize:'16px', padding:'4px', flexShrink:0 }
             }, '✕')
           ),
+          // 【P6 希釈計算ヘルパー】散布液量×1000÷希釈倍率＝必要な原液量(mL)。計量ミスを防ぐ。
+          (Number(sprayVolume) > 0 && Number(it.dilution) > 0) && React.createElement('div', {
+            style:{ fontSize:'11.5px', color:'#0A6B52', background:'#ECFDF5', border:'1px solid #A7F3D0', borderRadius:'6px', padding:'5px 9px', display:'flex', alignItems:'center', gap:'5px', flexWrap:'wrap' }
+          },
+            React.createElement('i', { className:'ti ti-calculator', 'aria-hidden':'true', style:{ fontSize:'12px', flexShrink:0 } }),
+            React.createElement('span', { style:{ fontWeight:700 } }, '必要な原液量：約 ' + (Math.round(Number(sprayVolume) * 1000 / Number(it.dilution) * 10) / 10) + ' mL'),
+            React.createElement('span', { style:{ color:'#6B7280' } }, '（散布液 ' + sprayVolume + 'L ÷ ' + it.dilution + '倍）')
+          ),
+          // 【P6 次回防除リマインド】この圃場でこの薬を前回撒いた日と経過日数
+          (() => {
+            const ls = lastSprayFor(it.pesticide_id)
+            if (!ls) return null
+            return React.createElement('div', { style:{ fontSize:'11px', color:'#92400E', background:'#FFFBEB', border:'1px solid #FDE68A', borderRadius:'6px', padding:'4px 9px', display:'flex', alignItems:'center', gap:'5px', flexWrap:'wrap' } },
+              React.createElement('i', { className:'ti ti-bell', 'aria-hidden':'true', style:{ fontSize:'12px', flexShrink:0 } }),
+              React.createElement('span', null, 'この圃場に前回この薬を撒いてから ' + (ls.days != null ? ls.days + '日' : '—') + '（' + ls.last + '）')
+            )
+          })(),
           React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:'6px' } },
             React.createElement('span', { style:{ fontSize:'11px', color:'#9CA3AF', fontWeight:600, flexShrink:0, whiteSpace:'nowrap' } },
               React.createElement('i', { className:'ti ti-trash', style:{ fontSize:'12px', verticalAlign:'-1px', marginRight:'3px', color:'#C2410C' } }),
