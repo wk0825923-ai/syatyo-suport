@@ -486,3 +486,31 @@
   padding:10px 22px; font-size:14px; font-weight:700; cursor:pointer;
 }
 .sb-eb-btn:hover{ background:#085A45; }
+
+/* ═══ 現場モード（P5：屋外・手袋対応。文字大・タップ領域拡大・コントラスト強） ═══ */
+/* body.field-mode をトグルで付与。クラス指定の主要コントロールを大きく・濃くする。 */
+body.field-mode .main{ font-size:15px; }
+/* 入力欄: 16pxで視認性UP＆スマホの自動ズーム防止、高さで押しやすく */
+body.field-mode input,
+body.field-mode select,
+body.field-mode textarea,
+body.field-mode .form-input,
+body.field-mode .form-select{ font-size:16px !important; min-height:48px; }
+/* 主要ボタン */
+body.field-mode .btn{ min-height:50px; font-size:16px; padding:12px 20px; }
+/* .main 内のボタン/タップ要素のタップ領域を拡大（アイコン小ボタンも押しやすく） */
+body.field-mode .main button,
+body.field-mode .main [role=button]{ min-height:46px; }
+/* サイドバーのメニューも大きく */
+body.field-mode .nav-item{ font-size:15px; padding:12px 12px; }
+body.field-mode .nav-icon{ font-size:20px; }
+body.field-mode .page-title{ font-size:24px; }
+/* コントラスト強化: 薄い枠線・区切りを濃くして屋外の白飛びでも境界が見える */
+body.field-mode{ --border-color:#8AA294; }
+body.field-mode .card,
+body.field-mode .card-sm,
+body.field-mode .form-input,
+body.field-mode .form-select{ border-color:#8AA294; }
+/* 現場モードトグル（body直下に生成される固定ボタン） */
+#sb-field-mode-toggle:hover{ filter:brightness(.96); }
+#sb-field-mode-toggle i{ font-size:15px; }

@@ -28,6 +28,25 @@
   }, [])
   // 【まっさら表示】?reset の farm_* 消去は index.html 冒頭で同期実行済み（認証/マウント前）。
   // 以前ここの useEffect にあったが認証済み再マウントで走らないことがあったため移設（番人監査 BUG#1）。
+  // 【P5: 現場モード】屋外・手袋向けに文字大・タップ領域拡大・コントラスト強を body.field-mode で適用。
+  // トグルは管理者/スタッフ両画面で使えるよう、body直下に固定ボタンとして生成する（showToastと同じDOM直生成方式）。
+  React.useEffect(() => {
+    let on = false
+    try { on = localStorage.getItem('sb_field_mode') === '1' } catch (e) {}
+    document.body.classList.toggle('field-mode', on)
+    const btn = document.createElement('button')
+    btn.id = 'sb-field-mode-toggle'
+    btn.type = 'button'
+    btn.setAttribute('aria-label', '現場モード切り替え')
+    const paint = () => {
+      btn.innerHTML = '<i class="ti ti-' + (on ? 'sun-high' : 'sun') + '" aria-hidden="true"></i><span>' + (on ? '現場モード ON' : '現場モード') + '</span>'
+      btn.style.cssText = 'position:fixed;left:14px;bottom:14px;z-index:9000;display:flex;align-items:center;gap:6px;padding:9px 14px;border-radius:999px;border:1px solid ' + (on ? '#0A6B52' : '#D8E4D8') + ';background:' + (on ? '#0A6B52' : '#fff') + ';color:' + (on ? '#fff' : '#0A6B52') + ';font-size:12.5px;font-weight:700;box-shadow:0 2px 12px rgba(0,0,0,.18);cursor:pointer;font-family:inherit'
+    }
+    paint()
+    btn.onclick = () => { on = !on; document.body.classList.toggle('field-mode', on); try { localStorage.setItem('sb_field_mode', on ? '1' : '0') } catch (e) {}; paint() }
+    document.body.appendChild(btn)
+    return () => { try { btn.remove(); document.body.classList.remove('field-mode') } catch (e) {} }
+  }, [])
   const [page,      setPage]     = React.useState('dashboard')
   // 【スタッフ画面】'admin'(経営者フル機能) / 'staff'(日報だけの簡易入力)。
   // ?view=staff で初期表示をスタッフ画面に。データは同じstate/localStorageなので同一端末で連動。
