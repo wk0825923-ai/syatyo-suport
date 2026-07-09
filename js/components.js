@@ -423,8 +423,14 @@ function Sidebar({ current, onChange, fields, onAddField, onDeleteField, current
   }
   const { fieldId: curFieldId, sub: curSub } = parseFieldPage(current)
 
-  const NavBtn = ({ item }) =>
+  // 【UX: サイドバーのスクロール位置保持】NavBtn/SectionHead を「インラインのReactコンポーネント」
+  // として React.createElement(NavBtn,...) で描画すると、Sidebar 再描画のたびに毎回“別コンポーネント型”
+  // 扱いになり全ナビ項目が破棄→再生成される。その瞬間スクロールコンテナの中身が空になり scrollTop が
+  // 0にクランプ＝クリックのたびに最上部へ戻る。これを避けるため、要素を直接返すプレーン関数にして
+  // 型が 'button' のまま安定させ、再マウントを防ぐ（keyは返す要素に付ける）。
+  const navBtn = (item) =>
     React.createElement('button', {
+      key: item.id,
       className: 'nav-item' + (current === item.id ? ' active' : ''),
       onClick: () => onChange(item.id),
     },
@@ -435,11 +441,12 @@ function Sidebar({ current, onChange, fields, onAddField, onDeleteField, current
     )
 
   // 折りたたみ式セクション見出し（クリックで開閉。シェブロンで状態表示）
-  const SectionHead = ({ label, sectionKey, open, mt='8px' }) =>
+  const sectionHead = (label, sectionKey, open, mt) =>
     React.createElement('button', {
+      key: 'sec-' + sectionKey,
       onClick: () => toggleSection(sectionKey),
       className: 'nav-section',
-      style:{ marginTop:mt, display:'flex', alignItems:'center', justifyContent:'space-between', width:'100%', background:'none', border:'none', cursor:'pointer', padding:'4px 10px' },
+      style:{ marginTop:(mt||'8px'), display:'flex', alignItems:'center', justifyContent:'space-between', width:'100%', background:'none', border:'none', cursor:'pointer', padding:'4px 10px' },
     },
       React.createElement('span', null, label),
       React.createElement('i', { className:'ti ti-chevron-' + (open ? 'down' : 'right'), 'aria-hidden':'true', style:{ fontSize:'14px', opacity:.6 } })
@@ -467,7 +474,7 @@ function Sidebar({ current, onChange, fields, onAddField, onDeleteField, current
 
     // ── 上部固定：ダッシュボード ──
     React.createElement('div', { className:'nav-wrap', style:{ flexShrink:0, paddingBottom:0 } },
-      ...NAV_SECTIONS_TOP.map(n => React.createElement(NavBtn, { key:n.id, item:n })),
+      ...NAV_SECTIONS_TOP.map(n => navBtn(n)),
       React.createElement('div', { style:{ marginTop:'10px', paddingLeft:'10px', paddingRight:'10px' } },
         React.createElement('div', { className:'nav-section', style:{ marginBottom:'6px', fontSize:'11px', letterSpacing:'.04em' } }, '圃場別管理'),
         React.createElement('div', { style:{ display:'flex', gap:'6px' } },
@@ -515,10 +522,10 @@ function Sidebar({ current, onChange, fields, onAddField, onDeleteField, current
       const dataOpen = openSections.data || NAV_SECTIONS_DATA.some(n => n.id === current)
       const sysOpen  = openSections.sys  || NAV_SECTIONS_SYS.some(n => n.id === current)
       return React.createElement('div', { className:'nav-wrap', style:{ flexShrink:0, paddingTop:'14px' } },
-        React.createElement(SectionHead, { label:'営農データ', sectionKey:'data', open:dataOpen, mt:'4px' }),
-        ...(dataOpen ? NAV_SECTIONS_DATA.map(n => React.createElement(NavBtn, { key:n.id, item:n })) : []),
-        React.createElement(SectionHead, { label:'管理・設定', sectionKey:'sys', open:sysOpen }),
-        ...(sysOpen ? NAV_SECTIONS_SYS.map(n => React.createElement(NavBtn, { key:n.id, item:n })) : []),
+        sectionHead('営農データ', 'data', dataOpen, '4px'),
+        ...(dataOpen ? NAV_SECTIONS_DATA.map(n => navBtn(n)) : []),
+        sectionHead('管理・設定', 'sys', sysOpen),
+        ...(sysOpen ? NAV_SECTIONS_SYS.map(n => navBtn(n)) : []),
       )
     })(),
 
