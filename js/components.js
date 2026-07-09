@@ -3198,7 +3198,7 @@ function StepBar({ step, steps }) {
 }
 
 // ── ステップ1: 日付・圃場・天気・作業者 ────────────
-function RecordStep1({ form, fields, up, onNext, isFieldPreset }) {
+function RecordStep1({ form, fields, up, onNext, isFieldPreset, recentFieldIds }) {
   const WEATHERS = [{ v:'晴', icon:'☀️' }, { v:'曇', icon:'🌤' }, { v:'雨', icon:'🌧' }, { v:'強風', icon:'💨' }]
   const [fieldQuery, setFieldQuery] = React.useState('')  // 圃場が多い時の検索
 
@@ -3252,9 +3252,13 @@ function RecordStep1({ form, fields, up, onNext, isFieldPreset }) {
       : (() => {
           const selectedIds = (form.field_ids && form.field_ids.length) ? form.field_ids : (form.field_id ? [Number(form.field_id)] : [])
           const q = fieldQuery.trim().toLowerCase()
-          const shown = q
+          const base = q
             ? fields.filter(f => (f.name||'').toLowerCase().includes(q) || String(f.field_no||'').toLowerCase().includes(q) || (f.crop||'').toLowerCase().includes(q))
             : fields
+          // 【P1】最近使った圃場を上に（recentFieldIds の順→未使用は元の順）。検索中はそのまま。
+          const rank = (id) => { const i = (recentFieldIds || []).indexOf(id); return i < 0 ? 9999 : i }
+          const shown = q ? base : [...base].sort((a, b) => rank(a.id) - rank(b.id))
+          const lastUsedId = (recentFieldIds && recentFieldIds.length) ? recentFieldIds[0] : null
           const setSel = (next) => { up('field_ids', next); up('field_id', next.length ? String(next[0]) : '') }
           return React.createElement('div', { className:'form-group' },
             React.createElement('div', { style:{ display:'flex', alignItems:'baseline', gap:8, marginBottom:6 } },
@@ -3286,10 +3290,11 @@ function RecordStep1({ form, fields, up, onNext, isFieldPreset }) {
                 }
               },
                 React.createElement('div', { style:{ width:16, height:16, borderRadius:'4px', border:'1px solid '+(isSel?'#0A6B52':'#CBD5E1'), background: isSel ? '#0A6B52' : '#fff', color:'#fff', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:700 } }, isSel ? '✓' : ''),
-                React.createElement('div', { style:{ minWidth:0 } },
+                React.createElement('div', { style:{ minWidth:0, flex:1 } },
                   React.createElement('div', { style:{ fontSize:'13px', color:'#374151', fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' } }, f.name),
                   React.createElement('div', { style:{ fontSize:'11px', color:'#9CA3AF' } }, f.crop)
-                )
+                ),
+                (f.id === lastUsedId) && React.createElement('span', { title:'前回この圃場に記録しました', style:{ flexShrink:0, fontSize:'9.5px', fontWeight:700, color:'#0A6B52', background:'#ECFDF5', border:'1px solid #A7F3D0', borderRadius:'4px', padding:'1px 5px' } }, '前回')
               )
             }))
           )
@@ -4580,9 +4585,22 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
   const presetFieldId = isFieldPreset ? String(fields[0].id) : ''
   // ログイン時に入力した名前を作業者名の既定に（毎回入れ直さなくてよい）
   const savedWorker = (() => { try { return localStorage.getItem('sb_name') || '' } catch (_) { return '' } })()
+  // 【P1: 毎朝の最初の一手を速く】現場は同じ畑を連日触るので、直近の記録から圃場の使用順を覚え、
+  // ①最近使った順にチップを並べ替え ②最後に使った圃場を初期選択 する（探す手間を削減）。
+  const recentFieldIds = React.useMemo(() => {
+    const last = {}
+    ;(records || []).forEach(r => {
+      if (r.field_id == null) return
+      const key = String(r.date || '0000-00-00') + '#' + String(r.id || 0).padStart(16, '0')
+      if (!last[r.field_id] || key > last[r.field_id]) last[r.field_id] = key
+    })
+    return Object.keys(last).map(Number).sort((a, b) => last[b].localeCompare(last[a]))
+  }, [records])
+  const lastFieldId = (!isFieldPreset && recentFieldIds.length && fields.some(f => f.id === recentFieldIds[0])) ? String(recentFieldIds[0]) : ''
+  const initFieldId = presetFieldId || lastFieldId
   const [form, setForm]         = React.useState({
     date: todayYmd(),
-    field_id: presetFieldId, field_ids: [], work_type: '', pesticide_id: '',
+    field_id: initFieldId, field_ids: initFieldId ? [Number(initFieldId)] : [], work_type: '', pesticide_id: '',
     amount: '', weather: '晴', worker: savedWorker, note: '', checks: {},
     start_time: '08:00', end_time: '17:00', break_minutes: 60,
     spray_method: '',       // 使用方法（散布・株元散布・土壌混和・灌注）
@@ -4672,7 +4690,7 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
   // CAT-04-2: stepComponents を useMemo でメモ化
   // → step/form/fields 等が変わった時だけ再生成され、無関係な再レンダーで再マウントされない
   const stepComponents = React.useMemo(() => [null,
-    () => React.createElement(RecordStep1, { form, fields, up:updateField, onNext:()=>setStep(2), isFieldPreset }),
+    () => React.createElement(RecordStep1, { form, fields, up:updateField, onNext:()=>setStep(2), isFieldPreset, recentFieldIds }),
     () => React.createElement(RecordStep2, { form, up:updateField, onPrev:()=>setStep(1), onNext:()=>setStep(3), onAddPhoto:handleAddPhoto, onRemovePhoto:handleRemovePhoto, photoError }),
     () => React.createElement(RecordStep3, { form, up:updateField, pesticides, records, lotSprayRecords, isOver, selField, handlePesticideUpdate, onPrev:()=>setStep(2), onNext:()=>setStep(4) }),
     () => React.createElement(RecordStep4, { form, dilution, selField, selP, isOver, onPrev:()=>setStep(3), onSave:handleSave, showContinueButton, onContinue:handleContinueInput }),
