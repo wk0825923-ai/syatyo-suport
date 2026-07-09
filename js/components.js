@@ -6249,7 +6249,8 @@ function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff, 
           // 【P6 次回防除リマインド】この圃場でこの薬を前回撒いた日と経過日数
           (() => {
             const ls = lastSprayFor(it.pesticide_id)
-            if (!ls) return null
+            // 日数が正常(0以上の有限値)な時だけ表示（壊れた日付の「—」や未来日誤入力の負日数を出さない・番人監査 P6 Low）
+            if (!ls || ls.days == null || ls.days < 0) return null
             return React.createElement('div', { style:{ fontSize:'11px', color:'#92400E', background:'#FFFBEB', border:'1px solid #FDE68A', borderRadius:'6px', padding:'4px 9px', display:'flex', alignItems:'center', gap:'5px', flexWrap:'wrap' } },
               React.createElement('i', { className:'ti ti-bell', 'aria-hidden':'true', style:{ fontSize:'12px', flexShrink:0 } }),
               React.createElement('span', null, 'この圃場に前回この薬を撒いてから ' + (ls.days != null ? ls.days + '日' : '—') + '（' + ls.last + '）')
