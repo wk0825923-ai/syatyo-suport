@@ -10540,7 +10540,7 @@ function GapChecklist({ gap, onToggle, ctx }) {
 
   // 未完了タブ時は空カテゴリを除外
   const filteredCats = cats.filter(cat => filteredGap.some(c => c.category === cat))
-  const schemeLabel = schemeSel === 'McD' ? 'McD Addendum' : schemeSel === 'both' ? 'GGAP＋McD' : 'GLOBALG.A.P. Ver6'
+  const schemeLabel = schemeSel === 'McD' ? 'McD Addendum' : schemeSel === 'GRASP' ? 'GRASP 2.0（労務）' : schemeSel === 'both' ? 'GGAP＋McD＋GRASP' : 'GLOBALG.A.P. Ver6'
 
   // タブスタイル定義
   const tabBase = {
@@ -10569,7 +10569,7 @@ function GapChecklist({ gap, onToggle, ctx }) {
       React.createElement('div',null,
         React.createElement('div',{className:'eyebrow'},'GAP CHECKLIST'),
         React.createElement('div',{className:'page-title'},'GAP対応チェックリスト'),
-        React.createElement('div',{className:'page-sub'},'GLOBALG.A.P. Ver6(2024) FV-Smart（190管理点）＋ McDonald\'s Addendum1.1（28監査ポイント）に対応。記録・帳票・トレーサビリティの管理点はシステムが自動で満たします（審査に提出可能）。物理・書面の管理点は現場でご対応ください。')
+        React.createElement('div',{className:'page-sub'},'GLOBALG.A.P. Ver6(2024) FV-Smart（190管理点）＋ McDonald\'s Addendum1.1（31監査ポイント）＋ GRASP 2.0（労務・67項目）に対応。記録・帳票・トレーサビリティの管理点はシステムが自動で満たします（審査に提出可能）。物理・書面の管理点は現場でご対応ください。')
       ),
       React.createElement('button',{ onClick:()=>window.print(), style:{ display:'inline-flex', alignItems:'center', gap:6, padding:'8px 14px', border:'1px solid #0A6B52', background:'#fff', color:'#0A6B52', borderRadius:8, fontSize:13, fontWeight:700, cursor:'pointer', flexShrink:0 } },
         React.createElement('i',{ className:'ti ti-printer', style:{ fontSize:15 } }), '審査用に印刷 / PDF')
@@ -10578,7 +10578,7 @@ function GapChecklist({ gap, onToggle, ctx }) {
     // 対象スキーム（GLOBALG.A.P. / McD Addendum / 両方）
     React.createElement('div',{ style:{ display:'flex', gap:8, alignItems:'center', margin:'8px 0 8px', flexWrap:'wrap' } },
       React.createElement('span',{ style:{ fontSize:12, color:'#6B7280', fontWeight:600 } }, '対象スキーム'),
-      ...[['GGAP','GLOBALG.A.P.'],['McD','McD Addendum'],['both','両方']].map(([k,lab]) =>
+      ...[['GGAP','GLOBALG.A.P.'],['McD','McD Addendum'],['GRASP','GRASP（労務）'],['both','全スキーム']].map(([k,lab]) =>
         React.createElement('button',{ key:k, onClick:()=>setSchemeSel(k),
           style:{ padding:'6px 14px', borderRadius:16, fontSize:12, fontWeight:700, cursor:'pointer', border:'1px solid',
             borderColor: schemeSel===k ? '#0A6B52' : '#DDE2EC', background: schemeSel===k ? '#ECFDF5' : '#fff', color: schemeSel===k ? '#0A6B52' : '#64748B' } }, lab))
