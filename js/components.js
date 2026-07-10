@@ -2035,7 +2035,7 @@ function RecordLogRow({ record, fields }) {
 // 最近の作業記録パネル（折りたたみ対応）
 // ダッシュボード「今日の作業配置」右側に並べる
 // =====================================================
-function RecentRecordsPanel({ records, fields, onSelectRecord, embedded }) {
+function RecentRecordsPanel({ records, fields, onSelectRecord, embedded, selectedId }) {
   const MAX_VISIBLE = 5
   const [open, setOpen] = React.useState(true)
   const [showAll, setShowAll] = React.useState(false)
@@ -2100,6 +2100,7 @@ function RecentRecordsPanel({ records, fields, onSelectRecord, embedded }) {
               const field = fields.find(f => f.id === r.field_id)
               const cfg = WORK_ICON_MAP[r.work_type] || WORK_ICON_MAP['その他']
               const isLast = idx === displayed.length - 1
+              const isSel = selectedId != null && r.id === selectedId   // 詳細表示中の作業を強調
               return React.createElement('div', {
                 key: r.id,
                 onClick: () => onSelectRecord && onSelectRecord(r),
@@ -2109,9 +2110,11 @@ function RecentRecordsPanel({ records, fields, onSelectRecord, embedded }) {
                   borderBottom: isLast ? 'none' : '1px solid #F1F5F9',
                   cursor: 'pointer',
                   transition: 'background .1s',
+                  background: isSel ? '#ECFDF5' : 'transparent',
+                  boxShadow: isSel ? 'inset 3px 0 0 #0A6B52' : 'none',
                 },
-                onMouseEnter: e => e.currentTarget.style.background = '#F8FAF8',
-                onMouseLeave: e => e.currentTarget.style.background = 'transparent',
+                onMouseEnter: e => { if (!isSel) e.currentTarget.style.background = '#F8FAF8' },
+                onMouseLeave: e => { e.currentTarget.style.background = isSel ? '#ECFDF5' : 'transparent' },
               },
                 React.createElement('div', {
                   style: {
@@ -2571,13 +2574,13 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
             style:{ position:'absolute', top:'-2px', right:'-2px', minWidth:'17px', height:'17px', padding:'0 4px', borderRadius:'9px', background:'#DC2626', color:'#fff', fontSize:'10px', fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', border:'2px solid #fff' }
           }, records.length > 99 ? '99+' : String(records.length))
         ),
-        // ポップアップ（外側クリックで閉じる）
+        // ポップアップ（詳細を開いても閉じない＝連続閲覧OK。外側クリック捕捉は詳細モーダルより下のz）
         showRecentPopup && React.createElement(React.Fragment, null,
-          React.createElement('div', { onClick:()=>setShowRecentPopup(false), style:{ position:'fixed', inset:0, zIndex:2500 } }),
+          React.createElement('div', { onClick:()=>setShowRecentPopup(false), style:{ position:'fixed', inset:0, zIndex:1990 } }),
           React.createElement('div', {
-            style:{ position:'absolute', top:'48px', right:0, width:'360px', maxWidth:'92vw', maxHeight:'70vh', overflowY:'auto', zIndex:2501, background:'#fff', borderRadius:'12px', boxShadow:'0 12px 40px rgba(0,0,0,.22)', border:'1px solid #E2E8F0' }
+            style:{ position:'absolute', top:'48px', right:0, width:'360px', maxWidth:'92vw', maxHeight:'70vh', overflowY:'auto', zIndex:2600, background:'#fff', borderRadius:'12px', boxShadow:'0 12px 40px rgba(0,0,0,.22)', border:'1px solid #E2E8F0' }
           },
-            React.createElement(RecentRecordsPanel, { records, fields, onSelectRecord: r => { setSelectedRecord(r); setShowRecentPopup(false) }, embedded:true })
+            React.createElement(RecentRecordsPanel, { records, fields, selectedId: selectedRecord && selectedRecord.id, onSelectRecord: r => setSelectedRecord(r), embedded:true })
           )
         )
       )

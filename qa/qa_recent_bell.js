@@ -49,20 +49,24 @@ const ensureApp=async(page)=>{ if(!(await page.evaluate(()=>!!document.querySele
   await sleep(500)
   R.popup = await page.evaluate(()=>{const t=document.body.innerText;return{ opened:/最近の作業記録/.test(t), hasRecords:/圃場/.test(t)&&/最近の作業記録/.test(t) }})
 
-  // ④ ポップアップ内の記録をクリック → 詳細モーダル
-  await page.evaluate(()=>{
-    const pop=[...document.querySelectorAll('div')].find(d=>d.style&&d.style.position==='absolute'&&/最近の作業記録/.test(d.textContent))
-    if(pop){const row=[...pop.querySelectorAll('div')].find(d=>/第\d+圃場|—/.test(d.textContent)&&d.onclick!==undefined&&d.textContent.length<60)|| [...pop.querySelectorAll('*')].find(e=>/施肥|農薬散布|除草|定植|収穫|点検/.test(e.textContent)&&e.offsetParent); if(row)row.click()}
-  })
-  await sleep(500)
-  R.detail = await page.evaluate(()=>/作業記録の詳細|記録の詳細|作業内容|削除|編集/.test(document.body.innerText) && !!document.querySelector('.main'))
+  // ④ ポップアップ内の記録(1件目)をクリック → 詳細モーダル。リストは開いたまま＋選択強調
+  const clickRow=async(idx)=>{ await page.evaluate((idx)=>{
+    const pop=[...document.querySelectorAll('div')].find(d=>d.style&&d.style.position==='absolute'&&d.style.zIndex==='2600')
+    if(!pop)return; const rows=[...pop.querySelectorAll('div')].filter(d=>/第\d+圃場/.test(d.textContent)&&/施肥|農薬散布|除草|定植|収穫|点検|畝づくり|灌水|播種/.test(d.textContent)&&d.textContent.length<50); const row=rows[idx]; if(row)row.click()
+  },idx); await sleep(400) }
+  await clickRow(0)
+  R.detail = await page.evaluate(()=>/作業種|廃棄物|削除|編集/.test(document.body.innerText))
+  R.popupStillOpen = await page.evaluate(()=>!!document.querySelector('div[style*="z-index: 2600"], div[style*="zIndex: 2600"]') || [...document.querySelectorAll('div')].some(d=>d.style&&d.style.zIndex==='2600'&&d.offsetParent))
+  R.highlighted = await page.evaluate(()=>{const pop=[...document.querySelectorAll('div')].find(d=>d.style&&d.style.zIndex==='2600');if(!pop)return false;return [...pop.querySelectorAll('div')].some(d=>/ECFDF5|236, 253, 245/.test(d.style.background||'')&&/第\d+圃場/.test(d.textContent))})
+  // 2件目を連続で選択（ベルを押し直さずに詳細が切り替わる）
+  const before=await page.evaluate(()=>{const m=document.body.innerText.match(/第(\d+)圃場/g);return m?m.join(','):''})
+  await clickRow(1)
+  R.consecutive = await page.evaluate(()=>/作業種|廃棄物|削除/.test(document.body.innerText)) // 詳細は依然表示
 
-  // 詳細を閉じてベル再オープン→外側クリックで閉じる
-  await page.keyboard.press('Escape'); await sleep(200)
-  await page.evaluate(()=>{const bell=[...document.querySelectorAll('button')].find(b=>b.querySelector('i.ti-bell')&&b.offsetParent);if(bell)bell.click()})
-  await sleep(300)
-  await page.mouse.click(700,500); await sleep(300)  // 外側クリック
-  R.closed = await page.evaluate(()=>{const pop=[...document.querySelectorAll('div')].find(d=>d.style&&d.style.position==='absolute'&&/最近の作業記録/.test(d.textContent));return !pop})
+  // 外側クリックで閉じる: 詳細は最前面なので①外側クリックで詳細が閉じ→②もう一度でポップアップが閉じる
+  await page.mouse.click(700,930); await sleep(250)  // 詳細モーダルのbackdrop→詳細を閉じる
+  await page.mouse.click(700,930); await sleep(300)  // ポップアップの捕捉→リストを閉じる
+  R.closed = await page.evaluate(()=>![...document.querySelectorAll('div')].some(d=>d.style&&d.style.zIndex==='2600'&&d.offsetParent))
 
   R.errors=errors
   console.log(JSON.stringify(R,null,2))
@@ -73,6 +77,9 @@ const ensureApp=async(page)=>{ if(!(await page.evaluate(()=>!!document.querySele
     ['農薬リスクなしがti-shield-check', R.icons.hasShield===true],
     ['ベルクリックでポップアップに記録', R.popup.opened===true],
     ['記録クリックで詳細モーダル', R.detail===true],
+    ['詳細を開いてもリストは開いたまま', R.popupStillOpen===true],
+    ['選択中の作業が強調表示', R.highlighted===true],
+    ['連続で別の記録を開ける(ベル押し直し不要)', R.consecutive===true],
     ['外側クリックで閉じる', R.closed===true],
     ['JSエラーなし', errors.length===0],
   ]
