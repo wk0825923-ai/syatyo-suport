@@ -1762,7 +1762,7 @@ function HarvestRiskClearBadge() {
       display:'flex', alignItems:'center', gap:'12px'
     }
   },
-    React.createElement('span', { style:{ fontSize:'18px' } }, '🌱'),
+    React.createElement('i', { className:'ti ti-shield-check', 'aria-hidden':'true', style:{ fontSize:'20px', color:'#0D9972', flexShrink:0 } }),
     React.createElement('div', { style:{ flex:1 } },
       React.createElement('div', { style:{ fontSize:'14px', color:'#065F46', fontWeight:500 } }, '今週の農薬リスクはありません'),
       React.createElement('div', { style:{ fontSize:'12px', color:'#6B7280', marginTop:'2px' } }, '近日収穫予定の圃場に残留農薬の懸念はありません')
@@ -2035,7 +2035,7 @@ function RecordLogRow({ record, fields }) {
 // 最近の作業記録パネル（折りたたみ対応）
 // ダッシュボード「今日の作業配置」右側に並べる
 // =====================================================
-function RecentRecordsPanel({ records, fields, onSelectRecord }) {
+function RecentRecordsPanel({ records, fields, onSelectRecord, embedded }) {
   const MAX_VISIBLE = 5
   const [open, setOpen] = React.useState(true)
   const [showAll, setShowAll] = React.useState(false)
@@ -2044,11 +2044,15 @@ function RecentRecordsPanel({ records, fields, onSelectRecord }) {
   const displayed = showAll ? recent : recent.slice(0, MAX_VISIBLE)
   const hasMore = recent.length > MAX_VISIBLE
 
+  // embedded(通知ポップアップ内)では、外側のポップアップが枠を持つので自前のカード枠は外す
   return React.createElement('div', {
-    className: 'card',
+    className: embedded ? '' : 'card',
     style: {
       padding: '0', overflow: 'hidden',
-      width: '100%',   // ダッシュボード単独配置に合わせて全幅（旧2カラムの300px固定を解除）
+      width: '100%',
+      background: embedded ? 'transparent' : undefined,
+      border: embedded ? 'none' : undefined,
+      boxShadow: embedded ? 'none' : undefined,
       transition: 'all .2s',
     }
   },
@@ -2065,7 +2069,7 @@ function RecentRecordsPanel({ records, fields, onSelectRecord }) {
       }
     },
       React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '7px' } },
-        React.createElement('span', { style: { fontSize: '15px' } }, '📝'),
+        React.createElement('i', { className: 'ti ti-clipboard-text', 'aria-hidden':'true', style: { fontSize: '16px', color: '#0A6B52' } }),
         React.createElement('span', { style: { fontSize: '13px', fontWeight: 700, color: '#111827' } }, '最近の作業記録'),
         React.createElement('span', {
           style: {
@@ -2457,6 +2461,8 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
   const [activeTask, setActiveTask] = React.useState(null)
   // 作業記録詳細モーダル用 state
   const [selectedRecord, setSelectedRecord] = React.useState(null)
+  // 【UX】最近の作業記録を右上の通知ベル→ポップアップで表示
+  const [showRecentPopup, setShowRecentPopup] = React.useState(false)
 
   // --- 先月比計算ヘルパー ---
   const now = new Date()
@@ -2553,8 +2559,27 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
         React.createElement('div', { className:'page-title' }, 'ダッシュボード'),
         React.createElement('div', { className:'page-sub', style:{ marginBottom:0 } }, today)
       ),
-      React.createElement('div', { style:{ fontSize:'12px', color:'#6B7280', background:'#F8FAFF', border:'1px solid #E5E9F0', borderRadius:'6px', padding:'6px 10px' } },
-        '🌱 農場名 管理システム'
+      // 右上: 最近の作業記録の通知ベル（クリックでポップアップ）
+      React.createElement('div', { style:{ position:'relative', display:'flex', alignItems:'center', gap:'10px' } },
+        React.createElement('button', {
+          onClick: () => setShowRecentPopup(v => !v),
+          title: '最近の作業記録',
+          style:{ position:'relative', display:'inline-flex', alignItems:'center', justifyContent:'center', width:'40px', height:'40px', borderRadius:'50%', background: showRecentPopup ? '#ECFDF5' : '#F8FAF9', border:'1px solid ' + (showRecentPopup ? '#A7F3D0' : '#E2E8E2'), cursor:'pointer' }
+        },
+          React.createElement('i', { className:'ti ti-bell', 'aria-hidden':'true', style:{ fontSize:'19px', color:'#0A6B52' } }),
+          (records && records.length > 0) && React.createElement('span', {
+            style:{ position:'absolute', top:'-2px', right:'-2px', minWidth:'17px', height:'17px', padding:'0 4px', borderRadius:'9px', background:'#DC2626', color:'#fff', fontSize:'10px', fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', border:'2px solid #fff' }
+          }, records.length > 99 ? '99+' : String(records.length))
+        ),
+        // ポップアップ（外側クリックで閉じる）
+        showRecentPopup && React.createElement(React.Fragment, null,
+          React.createElement('div', { onClick:()=>setShowRecentPopup(false), style:{ position:'fixed', inset:0, zIndex:2500 } }),
+          React.createElement('div', {
+            style:{ position:'absolute', top:'48px', right:0, width:'360px', maxWidth:'92vw', maxHeight:'70vh', overflowY:'auto', zIndex:2501, background:'#fff', borderRadius:'12px', boxShadow:'0 12px 40px rgba(0,0,0,.22)', border:'1px solid #E2E8F0' }
+          },
+            React.createElement(RecentRecordsPanel, { records, fields, onSelectRecord: r => { setSelectedRecord(r); setShowRecentPopup(false) }, embedded:true })
+          )
+        )
       )
     ),
 
@@ -2666,10 +2691,7 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
 
     // --- アラートカード（ビザ期限）---【削除済み】ビザ管理機能はスコープ外
 
-    // --- 最近の作業記録（ユーザー要望で「今日の作業配置(タスク)」はダッシュボードから外した）---
-    React.createElement('div', { style:{ marginBottom:'24px' } },
-      React.createElement(RecentRecordsPanel, { records, fields, onSelectRecord: r => setSelectedRecord(r) }),
-    ),
+    // 最近の作業記録は右上の通知ベル→ポップアップに移設（本文からは外してスッキリ）。
 
     // ── タスク日報入力モーダル ──
     activeTask && React.createElement('div', {
