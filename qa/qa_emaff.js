@@ -98,22 +98,26 @@ const expand=(page)=>page.evaluate(()=>{const b=[...document.querySelectorAll('b
   await clickText(page,'圃場一覧へ'); await sleep(600)   // 追加ボタンは圃場一覧ページにある
   await page.evaluate(()=>{const btn=[...document.querySelectorAll('button')].find(b=>/圃場を追加|新規圃場|圃場追加/.test(b.textContent)&&b.offsetParent);if(btn)btn.click()})
   await sleep(500)
-  // 折りたたみ前: エリアは常時表示・GAP詳細(所在地/eMAFF/チェック)は非表示。モーダルは高さ制限あり
+  // Step1(基本情報): エリア/面積は表示・GAP項目(所在地/eMAFF/チェック)はStep2なので非表示。高さ制限＋スキップボタンあり
   R.addModalBefore = await page.evaluate(()=>{
     const card=[...document.querySelectorAll('div')].find(d=>d.style&&d.style.maxHeight&&d.style.maxHeight.indexOf('vh')>=0&&/圃場を追加/.test(d.textContent))
     const ov=[...document.querySelectorAll('div')].find(d=>d.style&&d.style.position==='fixed'&&/圃場を追加/.test(d.textContent))
     const t=ov?ov.innerText:''
     return { modalOpen:!!ov, hasArea:/エリア/.test(t), hasAreaSize:/面積/.test(t),
-      boundedHeight:!!card, gapCollapsed:!/GGAP認証の対象圃場/.test(t), hasToggle:/GAP・所在地の詳細/.test(t) }
+      boundedHeight:!!card, gapCollapsed:!/GGAP認証の対象圃場/.test(t),
+      hasStep:/STEP 1 \/ 2/.test(t), hasNext:[...document.querySelectorAll('button')].some(b=>/次へ/.test(b.textContent)&&b.offsetParent),
+      hasSkip:[...document.querySelectorAll('button')].some(b=>/GAPは後で/.test(b.textContent)&&b.offsetParent) }
   })
-  // GAP詳細トグルを開く
-  await page.evaluate(()=>{const b=[...document.querySelectorAll('button')].find(x=>/GAP・所在地の詳細/.test(x.textContent)&&x.offsetParent);if(b)b.click()})
-  await sleep(400)
+  // 圃場名と面積を入れて Step2(GAP・所在地) へ
+  await page.evaluate(()=>{const set=(el,v)=>{const s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;s.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}))};const ov=[...document.querySelectorAll('div')].find(d=>d.style&&d.style.position==='fixed'&&/圃場を追加/.test(d.textContent));const inps=[...ov.querySelectorAll('input')];const nameI=inps.find(i=>/N-2|第21圃場/.test(i.placeholder||''));const areaI=inps.find(i=>i.type==='number');if(nameI)set(nameI,'N-99');if(areaI)set(areaI,'20')})
+  await sleep(200)
+  await clickText(page,'次へ'); await sleep(400)
   R.addModal = await page.evaluate(()=>{
     const ov=[...document.querySelectorAll('div')].find(d=>d.style&&d.style.position==='fixed'&&/圃場を追加/.test(d.textContent))
     const t=ov?ov.innerText:''
     return { hasEmaffInput:/eMAFF農地番号|農地一連番号/i.test(t), hasAddress:/所在地|住所/.test(t), hasNavLink:/農地ナビ/.test(t),
-      hasArea:/エリア/.test(t), hasGgapTarget:/GGAP認証の対象圃場/.test(t), hasCheckbox:!!(ov&&ov.querySelector('input[type=checkbox]')) }
+      isStep2:/STEP 2 \/ 2/.test(t), hasGgapTarget:/GGAP認証の対象圃場/.test(t), hasCheckbox:!!(ov&&ov.querySelector('input[type=checkbox]')),
+      hasAdd:[...document.querySelectorAll('button')].some(b=>/この内容で追加する/.test(b.textContent)&&b.offsetParent), hasBack:[...document.querySelectorAll('button')].some(b=>/戻る/.test(b.textContent)&&b.offsetParent) }
   })
   // モーダルを閉じる
   await page.evaluate(()=>{const b=[...document.querySelectorAll('button')].find(x=>/キャンセル|閉じる|×/.test(x.textContent)&&x.offsetParent);if(b)b.click()})
@@ -155,11 +159,12 @@ const expand=(page)=>page.evaluate(()=>{const b=[...document.querySelectorAll('b
     ['確認: 出力/キャンセルボタン', R.confirm&&R.confirm.hasOkCancel===true],
     ['確認: キャンセルで未ダウンロード', R.confirm&&R.confirm.downloadedAfterCancel===false],
     ['圃場追加: モーダル高さ制限あり(縦いっぱい解消)', R.addModalBefore&&R.addModalBefore.boundedHeight===true],
-    ['圃場追加: エリア/面積は常時表示', R.addModalBefore&&R.addModalBefore.hasArea===true&&R.addModalBefore.hasAreaSize===true],
-    ['圃場追加: GAP詳細は既定で折りたたみ', R.addModalBefore&&R.addModalBefore.gapCollapsed===true&&R.addModalBefore.hasToggle===true],
-    ['圃場追加: 展開でeMAFF入力欄あり', R.addModal&&R.addModal.hasEmaffInput===true],
-    ['圃場追加: 展開で所在地あり', R.addModal&&R.addModal.hasAddress===true],
-    ['圃場追加: 展開でGGAP対象チェックあり', R.addModal&&R.addModal.hasGgapTarget===true&&R.addModal.hasCheckbox===true],
+    ['圃場追加: Step1にエリア/面積とステップ表示', R.addModalBefore&&R.addModalBefore.hasArea===true&&R.addModalBefore.hasAreaSize===true&&R.addModalBefore.hasStep===true],
+    ['圃場追加: Step1でGAP項目は非表示', R.addModalBefore&&R.addModalBefore.gapCollapsed===true],
+    ['圃場追加: 次へ＋スキップ(GAPは後で)ボタン', R.addModalBefore&&R.addModalBefore.hasNext===true&&R.addModalBefore.hasSkip===true],
+    ['圃場追加: Step2でeMAFF入力欄あり', R.addModal&&R.addModal.hasEmaffInput===true&&R.addModal.isStep2===true],
+    ['圃場追加: Step2で所在地あり', R.addModal&&R.addModal.hasAddress===true],
+    ['圃場追加: Step2でGGAP対象チェック＋追加/戻る', R.addModal&&R.addModal.hasGgapTarget===true&&R.addModal.hasCheckbox===true&&R.addModal.hasAdd===true&&R.addModal.hasBack===true],
     ['帳票: eMAFF CSVボタンあり', R.exportBtn&&R.exportBtn.hasEmaffCsvBtn===true],
     ['巡回: 異常表示なし', R.pageScan.every(x=>!x.bad)],
     ['JSエラーなし', errors.length===0],
