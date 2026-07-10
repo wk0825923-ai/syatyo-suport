@@ -8153,6 +8153,9 @@ function FieldDetailPage({ field, fields, records, pesticides, onSaveRecord, onU
   const [addrDraft, setAddrDraft]       = React.useState('')
   const [emaffEditing, setEmaffEditing] = React.useState(false)
   const [emaffDraft, setEmaffDraft]     = React.useState('')
+  // 【見やすさ】GAP・所在地情報(所在地/eMAFF/GGAP対象)は既定で畳む。未登録が並ぶ見づらさを解消し、
+  // 初回はサマリ→登録、後からまとめて編集(スキップ可)できるように。
+  const [gapInfoOpen, setGapInfoOpen]   = React.useState(false)
   const fieldRows    = lots || []
   const [selectedRowNo, setSelectedRowNo] = React.useState(null)
 
@@ -8261,45 +8264,65 @@ function FieldDetailPage({ field, fields, records, pesticides, onSaveRecord, onU
           React.createElement('div', { style:{ fontSize:'12px', color:'#64748B', marginTop:'2px' } },
             (field.area_name ? field.area_name + '　·　' : '') + field.crop + '　·　' + field.area_are + 'a'
           ),
-          // 所在地(住所) — 既存圃場にも後から登録/編集できる。GAP登録圃場リストで必要。
-          React.createElement('div', { style:{ fontSize:'11px', color:'#6B7280', marginTop:'3px', display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' } },
-            addrEditing
-              ? React.createElement(React.Fragment, null,
-                  React.createElement('input', { autoFocus:true, value:addrDraft, onChange:e=>setAddrDraft(e.target.value), placeholder:'例: 千葉県木更津市○○ 123-4',
-                    style:{ fontSize:'12px', padding:'3px 7px', border:'1px solid #D8E4D8', borderRadius:5, width:'230px', outline:'none' } }),
-                  React.createElement('button', { onClick:()=>{ if(onUpdateField) onUpdateField({ address: addrDraft.trim() }); setAddrEditing(false); try{ if(typeof showToast==='function') showToast('所在地を保存しました','success') }catch(e){} },
-                    style:{ fontSize:11, fontWeight:700, color:'#fff', background:'#0A6B52', border:'none', borderRadius:5, padding:'3px 10px', cursor:'pointer' } }, '保存'),
-                  React.createElement('button', { onClick:()=>setAddrEditing(false), style:{ fontSize:11, color:'#6B7280', background:'none', border:'none', cursor:'pointer' } }, '取消')
-                )
-              : React.createElement(React.Fragment, null,
-                  field.address ? React.createElement('span', null, '📍 ' + field.address) : React.createElement('span', { style:{ color:'#94A3B8' } }, '📍 所在地 未登録'),
-                  React.createElement('button', { onClick:()=>{ setAddrDraft(field.address||''); setAddrEditing(true) },
-                    style:{ fontSize:11, color:'#0A6B52', background:'none', border:'none', cursor:'pointer', fontWeight:600 } }, field.address ? '編集' : '登録')
-                )
-          ),
-          // eMAFF農地番号 — eMAFF連携キー。既存圃場にも後から登録/編集できる。
-          React.createElement('div', { style:{ fontSize:'11px', color:'#6B7280', marginTop:'3px', display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' } },
-            emaffEditing
-              ? React.createElement(React.Fragment, null,
-                  React.createElement('input', { autoFocus:true, value:emaffDraft, onChange:e=>setEmaffDraft(e.target.value), placeholder:'例: 1234567890123（農地一連番号）',
-                    style:{ fontSize:'12px', padding:'3px 7px', border:'1px solid #D8E4D8', borderRadius:5, width:'230px', outline:'none' } }),
-                  React.createElement('button', { onClick:()=>{ if(onUpdateField) onUpdateField({ emaff_no: emaffDraft.trim() }); setEmaffEditing(false); try{ if(typeof showToast==='function') showToast('eMAFF農地番号を保存しました','success') }catch(e){} },
-                    style:{ fontSize:11, fontWeight:700, color:'#fff', background:'#0A6B52', border:'none', borderRadius:5, padding:'3px 10px', cursor:'pointer' } }, '保存'),
-                  React.createElement('button', { onClick:()=>setEmaffEditing(false), style:{ fontSize:11, color:'#6B7280', background:'none', border:'none', cursor:'pointer' } }, '取消')
-                )
-              : React.createElement(React.Fragment, null,
-                  field.emaff_no ? React.createElement('span', null, '🗺 eMAFF農地番号: ' + field.emaff_no) : React.createElement('span', { style:{ color:'#94A3B8' } }, '🗺 eMAFF農地番号 未登録'),
-                  React.createElement('button', { onClick:()=>{ setEmaffDraft(field.emaff_no||''); setEmaffEditing(true) },
-                    style:{ fontSize:11, color:'#0A6B52', background:'none', border:'none', cursor:'pointer', fontWeight:600 } }, field.emaff_no ? '編集' : '登録')
-                )
-          ),
-          // GGAP認証対象（★=対象 / 対象外）— クリックで切替。既定は対象。
-          React.createElement('div', { style:{ fontSize:'11px', color:'#6B7280', marginTop:'3px', display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' } },
-            (field.gap_target === false)
-              ? React.createElement('span', { style:{ color:'#94A3B8' } }, '☆ GGAP認証 対象外')
-              : React.createElement('span', { style:{ color:'#0A6B52', fontWeight:700 } }, '★ GGAP認証 対象'),
-            React.createElement('button', { onClick:()=>{ if(onUpdateField){ const next = !(field.gap_target !== false); onUpdateField({ gap_target: next }); try{ if(typeof showToast==='function') showToast(next?'GGAP認証の対象にしました':'GGAP認証の対象外にしました','success') }catch(e){} } },
-              style:{ fontSize:11, color:'#0A6B52', background:'none', border:'none', cursor:'pointer', fontWeight:600 } }, '切替')
+          // 【集約】GAP・所在地情報（所在地/eMAFF/GGAP対象）を1つの折りたたみに。既定は畳む。
+          React.createElement('div', { style:{ marginTop:'5px' } },
+            React.createElement('button', {
+              onClick: () => setGapInfoOpen(v => !v),
+              style:{ display:'flex', alignItems:'center', gap:'7px', background:'none', border:'none', cursor:'pointer', padding:'2px 0', fontSize:'11.5px', color:'#475569', flexWrap:'wrap' }
+            },
+              React.createElement('i', { className:'ti ti-chevron-' + (gapInfoOpen ? 'down' : 'right'), 'aria-hidden':'true', style:{ fontSize:'13px', color:'#94A3B8' } }),
+              React.createElement('span', { style:{ fontWeight:700, color:'#334155' } }, '🗂 GAP・所在地情報'),
+              (() => {
+                const setN = (field.address ? 1 : 0) + (field.emaff_no ? 1 : 0)
+                const meta = setN === 2 ? { t:'設定済み', c:'#0A6B52', bg:'#ECFDF5', bd:'#A7F3D0' }
+                  : setN === 1 ? { t:'一部設定', c:'#B45309', bg:'#FFFBEB', bd:'#FDE68A' }
+                  : { t:'未設定', c:'#94A3B8', bg:'#F1F5F9', bd:'#E2E8F0' }
+                return React.createElement('span', { style:{ fontSize:'10px', fontWeight:700, color:meta.c, background:meta.bg, border:'1px solid '+meta.bd, borderRadius:10, padding:'1px 8px' } }, meta.t)
+              })(),
+              !gapInfoOpen && React.createElement('span', { style:{ fontSize:'10.5px', color:'#0A6B52', fontWeight:600 } }, '登録 / 編集')
+            ),
+            gapInfoOpen && React.createElement('div', { style:{ display:'flex', flexDirection:'column', gap:'7px', marginTop:'8px', paddingLeft:'20px', borderLeft:'2px solid #EDF2ED' } },
+              // 所在地
+              React.createElement('div', { style:{ fontSize:'11px', color:'#6B7280', display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' } },
+                addrEditing
+                  ? React.createElement(React.Fragment, null,
+                      React.createElement('input', { autoFocus:true, value:addrDraft, onChange:e=>setAddrDraft(e.target.value), placeholder:'例: 千葉県木更津市○○ 123-4',
+                        style:{ fontSize:'12px', padding:'3px 7px', border:'1px solid #D8E4D8', borderRadius:5, width:'230px', outline:'none' } }),
+                      React.createElement('button', { onClick:()=>{ if(onUpdateField) onUpdateField({ address: addrDraft.trim() }); setAddrEditing(false); try{ if(typeof showToast==='function') showToast('所在地を保存しました','success') }catch(e){} },
+                        style:{ fontSize:11, fontWeight:700, color:'#fff', background:'#0A6B52', border:'none', borderRadius:5, padding:'3px 10px', cursor:'pointer' } }, '保存'),
+                      React.createElement('button', { onClick:()=>setAddrEditing(false), style:{ fontSize:11, color:'#6B7280', background:'none', border:'none', cursor:'pointer' } }, '取消')
+                    )
+                  : React.createElement(React.Fragment, null,
+                      field.address ? React.createElement('span', null, '📍 ' + field.address) : React.createElement('span', { style:{ color:'#94A3B8' } }, '📍 所在地 未登録'),
+                      React.createElement('button', { onClick:()=>{ setAddrDraft(field.address||''); setAddrEditing(true) },
+                        style:{ fontSize:11, color:'#0A6B52', background:'none', border:'none', cursor:'pointer', fontWeight:600 } }, field.address ? '編集' : '登録')
+                    )
+              ),
+              // eMAFF農地番号
+              React.createElement('div', { style:{ fontSize:'11px', color:'#6B7280', display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' } },
+                emaffEditing
+                  ? React.createElement(React.Fragment, null,
+                      React.createElement('input', { autoFocus:true, value:emaffDraft, onChange:e=>setEmaffDraft(e.target.value), placeholder:'例: 1234567890123（農地一連番号）',
+                        style:{ fontSize:'12px', padding:'3px 7px', border:'1px solid #D8E4D8', borderRadius:5, width:'230px', outline:'none' } }),
+                      React.createElement('button', { onClick:()=>{ if(onUpdateField) onUpdateField({ emaff_no: emaffDraft.trim() }); setEmaffEditing(false); try{ if(typeof showToast==='function') showToast('eMAFF農地番号を保存しました','success') }catch(e){} },
+                        style:{ fontSize:11, fontWeight:700, color:'#fff', background:'#0A6B52', border:'none', borderRadius:5, padding:'3px 10px', cursor:'pointer' } }, '保存'),
+                      React.createElement('button', { onClick:()=>setEmaffEditing(false), style:{ fontSize:11, color:'#6B7280', background:'none', border:'none', cursor:'pointer' } }, '取消')
+                    )
+                  : React.createElement(React.Fragment, null,
+                      field.emaff_no ? React.createElement('span', null, '🗺 eMAFF農地番号: ' + field.emaff_no) : React.createElement('span', { style:{ color:'#94A3B8' } }, '🗺 eMAFF農地番号 未登録'),
+                      React.createElement('button', { onClick:()=>{ setEmaffDraft(field.emaff_no||''); setEmaffEditing(true) },
+                        style:{ fontSize:11, color:'#0A6B52', background:'none', border:'none', cursor:'pointer', fontWeight:600 } }, field.emaff_no ? '編集' : '登録')
+                    )
+              ),
+              // GGAP認証対象
+              React.createElement('div', { style:{ fontSize:'11px', color:'#6B7280', display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' } },
+                (field.gap_target === false)
+                  ? React.createElement('span', { style:{ color:'#94A3B8' } }, '☆ GGAP認証 対象外')
+                  : React.createElement('span', { style:{ color:'#0A6B52', fontWeight:700 } }, '★ GGAP認証 対象'),
+                React.createElement('button', { onClick:()=>{ if(onUpdateField){ const next = !(field.gap_target !== false); onUpdateField({ gap_target: next }); try{ if(typeof showToast==='function') showToast(next?'GGAP認証の対象にしました':'GGAP認証の対象外にしました','success') }catch(e){} } },
+                  style:{ fontSize:11, color:'#0A6B52', background:'none', border:'none', cursor:'pointer', fontWeight:600 } }, '切替')
+              )
+            )
           ),
         ),
         React.createElement('span', { className:'badge ' + statusClass, style:{ marginLeft:'4px' } }, field.status),
