@@ -30,6 +30,10 @@ const ensureApp=async(page)=>{ if(!(await page.evaluate(()=>!!document.querySele
   await ensureApp(page)
   await page.goto(`http://localhost:${PORT}/?demo`,{waitUntil:'networkidle2',timeout:60000}); await sleep(4000)
   await ensureApp(page)
+  // 本日の記録が無いデモに、本日3件を追加（A案=本日の作業記録ベース）
+  const fid=await page.evaluate(()=>CONFIG.CURRENT_FARM_ID)
+  await page.evaluate((fid)=>{const t=todayYmd();const raw=localStorage.getItem('farm_records_'+fid);const arr=raw?JSON.parse(raw):[];const f=JSON.parse(localStorage.getItem('farm_fields_v2_'+fid))[0].id;arr.push({id:999001,field_id:f,date:t,work_type:'除草',weather:'晴',worker:'今福'});arr.push({id:999002,field_id:f,date:t,work_type:'施肥',weather:'晴',worker:'今福'});arr.push({id:999003,field_id:f,date:t,work_type:'点検',weather:'晴',worker:'佐藤'});localStorage.setItem('farm_records_'+fid,JSON.stringify(arr))},fid)
+  await page.reload({waitUntil:'networkidle2'}); await sleep(1200); await ensureApp(page)
   const R={}
 
   // ① ベル＋バッジ
@@ -47,7 +51,7 @@ const ensureApp=async(page)=>{ if(!(await page.evaluate(()=>!!document.querySele
   // ③ ベルクリック → ポップアップに記録
   await page.evaluate(()=>{const bell=[...document.querySelectorAll('button')].find(b=>b.querySelector('i.ti-bell')&&b.offsetParent);if(bell)bell.click()})
   await sleep(500)
-  R.popup = await page.evaluate(()=>{const t=document.body.innerText;const m=t.match(/最近の作業記録\s*(\d+)件/);return{ opened:/最近の作業記録/.test(t), hasRecords:/圃場/.test(t)&&/最近の作業記録/.test(t), count:m?parseInt(m[1]):null }})
+  R.popup = await page.evaluate(()=>{const t=document.body.innerText;const m=t.match(/本日の作業記録\s*(\d+)件/);return{ opened:/本日の作業記録/.test(t), hasRecords:/圃場/.test(t)&&/本日の作業記録/.test(t), count:m?parseInt(m[1]):null }})
   R.badgeMatches = (R.bell.badge!=null) && (parseInt(R.bell.badge)===R.popup.count)
 
   // ④ ポップアップ内の記録(1件目)をクリック → 詳細モーダル。リストは開いたまま＋選択強調

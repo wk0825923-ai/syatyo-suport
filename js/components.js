@@ -2036,120 +2036,80 @@ function RecordLogRow({ record, fields }) {
 // ダッシュボード「今日の作業配置」右側に並べる
 // =====================================================
 function RecentRecordsPanel({ records, fields, onSelectRecord, embedded, selectedId }) {
-  const MAX_VISIBLE = 5
   const [open, setOpen] = React.useState(true)
-  const [showAll, setShowAll] = React.useState(false)
+  const [showPast, setShowPast] = React.useState(false)
 
-  const recent = [...records].reverse().slice(0, 7)
-  const displayed = showAll ? recent : recent.slice(0, MAX_VISIBLE)
-  const hasMore = recent.length > MAX_VISIBLE
+  // 【A案】本日の作業記録を主役に（0時で自動リセット・記録で増える）＋過去も辿れる
+  const today = todayYmd()
+  const all = [...(records || [])].reverse()
+  const todayRecs = all.filter(r => r.date === today)
+  const pastRecs  = all.filter(r => r.date !== today).slice(0, 10)
 
-  // embedded(通知ポップアップ内)では、外側のポップアップが枠を持つので自前のカード枠は外す
+  // 1行の描画（本日／過去で共用）
+  const renderRow = (r, isLast) => {
+    const field = fields.find(f => f.id === r.field_id)
+    const cfg = WORK_ICON_MAP[r.work_type] || WORK_ICON_MAP['その他']
+    const isSel = selectedId != null && r.id === selectedId
+    return React.createElement('div', {
+      key: r.id,
+      onClick: () => onSelectRecord && onSelectRecord(r),
+      style: {
+        display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 16px',
+        borderBottom: isLast ? 'none' : '1px solid #F1F5F9', cursor: 'pointer', transition: 'background .1s',
+        background: isSel ? '#ECFDF5' : 'transparent', boxShadow: isSel ? 'inset 3px 0 0 #0A6B52' : 'none',
+      },
+      onMouseEnter: e => { if (!isSel) e.currentTarget.style.background = '#F8FAF8' },
+      onMouseLeave: e => { e.currentTarget.style.background = isSel ? '#ECFDF5' : 'transparent' },
+    },
+      React.createElement('div', { style: { width: 28, height: 28, borderRadius: '50%', background: cfg.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 } },
+        React.createElement('i', { className: 'ti ti-' + cfg.icon, style: { fontSize: '13px', color: '#fff' } })
+      ),
+      React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+        React.createElement('div', { style: { fontSize: '13px', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, r.work_type + (field ? ' — ' + field.name : '')),
+        React.createElement('div', { style: { fontSize: '11px', color: '#94A3B8', marginTop: '1px' } }, r.date + (r.worker ? ' · ' + r.worker : ''))
+      ),
+      field && React.createElement('div', { style: { width: 7, height: 7, borderRadius: '50%', background: field.color || '#0A6B52', flexShrink: 0 } })
+    )
+  }
+
   return React.createElement('div', {
     className: embedded ? '' : 'card',
-    style: {
-      padding: '0', overflow: 'hidden',
-      width: '100%',
-      background: embedded ? 'transparent' : undefined,
-      border: embedded ? 'none' : undefined,
-      boxShadow: embedded ? 'none' : undefined,
-      transition: 'all .2s',
-    }
+    style: { padding: '0', overflow: 'hidden', width: '100%',
+      background: embedded ? 'transparent' : undefined, border: embedded ? 'none' : undefined, boxShadow: embedded ? 'none' : undefined, transition: 'all .2s' }
   },
     // ── ヘッダー（クリックで折りたたみ） ──
     React.createElement('div', {
       onClick: () => setOpen(o => !o),
-      style: {
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '14px 16px 10px',
-        borderBottom: open ? '1px solid #E8EEE8' : 'none',
-        background: '#F8FAF8',
-        cursor: 'pointer',
-        userSelect: 'none',
-      }
+      style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px 10px', borderBottom: open ? '1px solid #E8EEE8' : 'none', background: '#F8FAF8', cursor: 'pointer', userSelect: 'none' }
     },
       React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '7px' } },
         React.createElement('i', { className: 'ti ti-clipboard-text', 'aria-hidden':'true', style: { fontSize: '16px', color: '#0A6B52' } }),
-        React.createElement('span', { style: { fontSize: '13px', fontWeight: 700, color: '#111827' } }, '最近の作業記録'),
-        React.createElement('span', {
-          style: {
-            fontSize: '10px', fontWeight: 600, padding: '1px 7px', borderRadius: '20px',
-            background: '#E0F2FE', color: '#0369A1', border: '1px solid #BAE6FD'
-          }
-        }, recent.length + '件')
+        React.createElement('span', { style: { fontSize: '13px', fontWeight: 700, color: '#111827' } }, '本日の作業記録'),
+        React.createElement('span', { style: { fontSize: '10px', fontWeight: 600, padding: '1px 7px', borderRadius: '20px', background: '#E0F2FE', color: '#0369A1', border: '1px solid #BAE6FD' } }, todayRecs.length + '件')
       ),
-      React.createElement('div', {
-        style: {
-          fontSize: '11px', color: '#94A3B8', fontWeight: 700,
-          transition: 'transform .22s cubic-bezier(.4,0,.2,1)',
-          transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
-          lineHeight: 1,
-        }
-      }, '▼')
+      React.createElement('div', { style: { fontSize: '11px', color: '#94A3B8', fontWeight: 700, transition: 'transform .22s cubic-bezier(.4,0,.2,1)', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', lineHeight: 1 } }, '▼')
     ),
 
     // ── 本体（なめらかな折りたたみ） ──
     React.createElement('div', { className: 'smooth-collapse-wrap' + (open ? ' open' : '') },
       React.createElement('div', { className: 'smooth-collapse-inner' },
-      recent.length === 0
-        ? React.createElement('div', {
-            style: { padding: '20px 16px', fontSize: '13px', color: '#9CA3AF', textAlign: 'center' }
-          }, '作業記録がありません')
-        : React.createElement('div', { style: { padding: '4px 0' } },
-            displayed.map((r, idx) => {
-              const field = fields.find(f => f.id === r.field_id)
-              const cfg = WORK_ICON_MAP[r.work_type] || WORK_ICON_MAP['その他']
-              const isLast = idx === displayed.length - 1
-              const isSel = selectedId != null && r.id === selectedId   // 詳細表示中の作業を強調
-              return React.createElement('div', {
-                key: r.id,
-                onClick: () => onSelectRecord && onSelectRecord(r),
-                style: {
-                  display: 'flex', alignItems: 'center', gap: '10px',
-                  padding: '9px 16px',
-                  borderBottom: isLast ? 'none' : '1px solid #F1F5F9',
-                  cursor: 'pointer',
-                  transition: 'background .1s',
-                  background: isSel ? '#ECFDF5' : 'transparent',
-                  boxShadow: isSel ? 'inset 3px 0 0 #0A6B52' : 'none',
-                },
-                onMouseEnter: e => { if (!isSel) e.currentTarget.style.background = '#F8FAF8' },
-                onMouseLeave: e => { e.currentTarget.style.background = isSel ? '#ECFDF5' : 'transparent' },
-              },
-                React.createElement('div', {
-                  style: {
-                    width: 28, height: 28, borderRadius: '50%',
-                    background: cfg.color,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-                  }
-                },
-                  React.createElement('i', { className: 'ti ti-' + cfg.icon, style: { fontSize: '13px', color: '#fff' } })
-                ),
-                React.createElement('div', { style: { flex: 1, minWidth: 0 } },
-                  React.createElement('div', {
-                    style: { fontSize: '13px', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
-                  }, r.work_type + (field ? ' — ' + field.name : '')),
-                  React.createElement('div', { style: { fontSize: '11px', color: '#94A3B8', marginTop: '1px' } },
-                    r.date + (r.worker ? ' · ' + r.worker : '')
-                  )
-                ),
-                field && React.createElement('div', {
-                  style: { width: 7, height: 7, borderRadius: '50%', background: field.color || '#0A6B52', flexShrink: 0 }
-                })
-              )
-            }),
-
-            // 「もっと見る / 閉じる」トグル
-            hasMore && React.createElement('div', {
-              onClick: () => setShowAll(s => !s),
-              style: {
-                padding: '9px 16px', borderTop: '1px solid #F1F5F9',
-                fontSize: '12px', fontWeight: 600, color: '#0A6B52',
-                cursor: 'pointer', textAlign: 'center', background: '#FAFBFA',
-                transition: 'background .12s',
-              }
-            }, showAll ? '▲ 閉じる' : '▼ もっと見る（' + (recent.length - MAX_VISIBLE) + '件）')
-          )
+        // 本日の記録
+        todayRecs.length === 0
+          ? React.createElement('div', { style: { padding: '20px 16px', fontSize: '13px', color: '#9CA3AF', textAlign: 'center', lineHeight: 1.6 } },
+              '本日の作業記録はまだありません', React.createElement('br', null),
+              React.createElement('span', { style: { fontSize: '11px' } }, '日報を入力すると、ここに当日の記録が溜まります'))
+          : React.createElement('div', { style: { padding: '4px 0' } },
+              todayRecs.map((r, idx) => renderRow(r, idx === todayRecs.length - 1))
+            ),
+        // 過去の記録も見る（トグル）
+        pastRecs.length > 0 && React.createElement('div', {
+          onClick: () => setShowPast(s => !s),
+          style: { padding: '9px 16px', borderTop: '1px solid #F1F5F9', fontSize: '12px', fontWeight: 600, color: '#0A6B52', cursor: 'pointer', textAlign: 'center', background: '#FAFBFA' }
+        }, showPast ? '▲ 過去の記録を閉じる' : '▼ 過去の記録も見る（' + pastRecs.length + '件）'),
+        (showPast && pastRecs.length > 0) && React.createElement('div', { style: { padding: '4px 0', background: '#FCFDFC' } },
+          React.createElement('div', { style: { fontSize: '10px', fontWeight: 700, color: '#94A3B8', padding: '4px 16px 2px', letterSpacing: '.04em' } }, '過去の記録'),
+          pastRecs.map((r, idx) => renderRow(r, idx === pastRecs.length - 1))
+        )
       ) // end smooth-collapse-inner
     ) // end smooth-collapse-wrap
   )
@@ -2466,6 +2426,8 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
   const [selectedRecord, setSelectedRecord] = React.useState(null)
   // 【UX】最近の作業記録を右上の通知ベル→ポップアップで表示
   const [showRecentPopup, setShowRecentPopup] = React.useState(false)
+  // バッジ＝本日の作業記録件数（0時で自動リセット。記録が入ると増える）
+  const todayRecordCount = (records || []).filter(r => r.date === todayYmd()).length
 
   // --- 先月比計算ヘルパー ---
   const now = new Date()
@@ -2570,10 +2532,10 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
           style:{ position:'relative', display:'inline-flex', alignItems:'center', justifyContent:'center', width:'40px', height:'40px', borderRadius:'50%', background: showRecentPopup ? '#ECFDF5' : '#F8FAF9', border:'1px solid ' + (showRecentPopup ? '#A7F3D0' : '#E2E8E2'), cursor:'pointer' }
         },
           React.createElement('i', { className:'ti ti-bell', 'aria-hidden':'true', style:{ fontSize:'19px', color:'#0A6B52' } }),
-          // バッジはポップアップの「最近の作業記録 N件」（直近＝最大7件）と一致させる
-          (records && records.length > 0) && React.createElement('span', {
+          // バッジ＝本日の作業記録件数（ポップアップ「本日の作業記録 N件」と一致。0件は非表示）
+          (todayRecordCount > 0) && React.createElement('span', {
             style:{ position:'absolute', top:'-2px', right:'-2px', minWidth:'17px', height:'17px', padding:'0 4px', borderRadius:'9px', background:'#DC2626', color:'#fff', fontSize:'10px', fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', border:'2px solid #fff' }
-          }, String(Math.min(records.length, 7)))
+          }, todayRecordCount > 99 ? '99+' : String(todayRecordCount))
         ),
         // ポップアップ（詳細を開いても閉じない＝連続閲覧OK。外側クリック捕捉は詳細モーダルより下のz）
         showRecentPopup && React.createElement(React.Fragment, null,
