@@ -2666,20 +2666,8 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
 
     // --- アラートカード（ビザ期限）---【削除済み】ビザ管理機能はスコープ外
 
-    // --- 今日やることリスト + 最近の作業記録（横並び2カラム） ---
-    React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'1fr auto', gap:'16px', marginBottom:'24px', alignItems:'start' } },
-
-      // 左: 今日の作業配置
-      React.createElement(TodayTaskList, {
-        tasks: todayTasks,
-        fields,
-        staff,
-        onToggle: onToggleTodayTask,
-        onAdd:    onAddTodayTask,
-        onOpenRecord: task => setActiveTask(task),
-      }),
-
-      // 右: 最近の作業記録（折りたたみ付き）
+    // --- 最近の作業記録（ユーザー要望で「今日の作業配置(タスク)」はダッシュボードから外した）---
+    React.createElement('div', { style:{ marginBottom:'24px' } },
       React.createElement(RecentRecordsPanel, { records, fields, onSelectRecord: r => setSelectedRecord(r) }),
     ),
 
@@ -2729,16 +2717,9 @@ function Dashboard({ fields, records, staff, gap, todayTasks, onToggleTodayTask,
       onDelete: onDeleteRecord ? id => { onDeleteRecord(id); setSelectedRecord(null) } : null,
     }),
 
-    // --- UX-11: 月次作業サマリー（振り返り用。既定で折りたたみ、必要な時だけ開く）---
-    React.createElement(CollapsibleSection, { title:'月次作業サマリー', hint:'（振り返り・直近6ヶ月）', defaultOpen:false },
-      React.createElement(MonthlySummaryChart, { records })),
-
-    // --- 最下部: 来年の作付提案 + 圃場サマリー（全幅） ---
-    React.createElement('div', { className:'page-grow' },
-      React.createElement('div', { className:'section-title' }, '来年の作付提案'),
-      React.createElement(CropSuggestionCard, { fields, cropPlans: cropPlans || [] }),
-      React.createElement(FieldSummaryTabPanel, { fields, records })
-    )
+    // 【スッキリ化・ユーザー要望】月次作業サマリー・来年の作付提案・圃場サマリーはダッシュボードから外した。
+    // それぞれ「圃場まとめ」「作付計画」の専用ページに集約済みで、ダッシュボードでの重複を解消。
+    React.createElement('div', { className:'page-grow' })
   )
 }
 
