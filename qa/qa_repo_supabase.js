@@ -9,6 +9,7 @@ function makeMockSb() {
   const api = {
     _tables: tables,
     _channels: [],
+    _upsertLog: [],
     from(table) {
       tables[table] = tables[table] || []
       const q = {
@@ -16,6 +17,7 @@ function makeMockSb() {
         select() { this._op = 'select'; return this },
         delete() { this._op = 'delete'; return this },
         eq(col, val) { this._filter = { col, val }; return this },
+        in(col, vals) { this._in = { col, vals: vals.map(String) }; return this },
         not(col, op, listStr) {
           const vals = String(listStr).replace(/^\(|\)$/g, '').split(',').map(s => s.replace(/^"|"$/g, ''))
           this._notIn = { col, vals }; return this
@@ -23,6 +25,7 @@ function makeMockSb() {
         limit(n) { this._limit = n; return this },
         insert(rows) { tables[table].push(...rows.map(r => Object.assign({}, r))); return Promise.resolve({ error: null }) },
         upsert(rows, opts) {
+          api._upsertLog.push(rows.map(r => Object.assign({}, r))) // 何行送られたかの検証用(R15)
           const cols = (opts && opts.onConflict ? opts.onConflict : 'id').split(',').map(s => s.trim())
           rows.forEach(nr => {
             const idx = tables[table].findIndex(er => cols.every(c => er[c] === nr[c]))
@@ -37,8 +40,9 @@ function makeMockSb() {
             if (this._filter) {
               keep = keep.filter(r => {
                 if (r[this._filter.col] !== this._filter.val) return true // 別farmは残す
+                if (this._in) return this._in.vals.indexOf(String(r[this._in.col])) < 0 // in指定: リスト内keyだけ消す
                 if (this._notIn) return this._notIn.vals.indexOf(r[this._notIn.col]) >= 0 // リスト内keyは残す
-                return false // farm一致・not条件なし＝消す
+                return false // farm一致・追加条件なし＝消す
               })
             } else keep = []
             tables[table] = keep
@@ -154,6 +158,49 @@ const KEY = 'farm_shipment_destinations_' + FARM
   await farmRepo.write(KEY, [{ key: 'ja', label: 'JA木更津(更新)', frequent: false, sort_order: 0 }])
   const r12 = await farmRepo.readAsync(KEY)
   ok('R12 同一keyは重複せず更新される(upsert)', r12.value.length === 1 && r12.value[0].label === 'JA木更津(更新)', JSON.stringify(r12.value))
+
+  // ── 行単位差分同期(スナップショット基準・Codex High「同時保存の相互消し」対応)の検証 ──
+  const SK = 'farm_shipment_destinations|' + FARM
+  const JA = { key: 'ja', label: 'JA木更津(更新)', frequent: false, sort_order: 0 }
+
+  // 13) 2端末がほぼ同時に別々の行を追加しても、後勝ちが先の追加を消さない
+  await farmRepo.readAsync(KEY) // 端末A/B共通の「読んだ状態」= {ja}
+  const staleSnap = Object.assign({}, SupabaseRepository._snap[SK]) // 端末Bのstaleスナップショットを退避
+  await farmRepo.write(KEY, [JA, { key: 'x', label: '端末Aの追加', frequent: false, sort_order: 1 }]) // 端末Aが x を追加
+  SupabaseRepository._snap[SK] = staleSnap // 端末Bはまだ x を知らない状態を再現
+  await farmRepo.write(KEY, [JA, { key: 'y', label: '端末Bの追加', frequent: false, sort_order: 2 }]) // 端末Bが y を追加
+  const r13 = await farmRepo.readAsync(KEY)
+  const keys13 = r13.value.map(d => d.key).sort()
+  ok('R13 同時追加で先の端末の行が消えない(相互消し解消)',
+    keys13.join(',') === 'ja,x,y', JSON.stringify(keys13))
+
+  // 14) 削除はスナップショット基準で狙い撃ち（自分が消した行だけ・他端末の追加行は無傷）
+  // 直前のreadAsyncでsnap={ja,x,y}。ここで ja だけ消す → x,y は残るべき
+  await farmRepo.write(KEY, [
+    { key: 'x', label: '端末Aの追加', frequent: false, sort_order: 1 },
+    { key: 'y', label: '端末Bの追加', frequent: false, sort_order: 2 },
+  ])
+  const r14 = await farmRepo.readAsync(KEY)
+  const keys14 = r14.value.map(d => d.key).sort()
+  ok('R14 削除は自分が消した行だけ狙い撃ち(jaだけ消えx,yは残る)',
+    keys14.join(',') === 'x,y', JSON.stringify(keys14))
+
+  // 15) 未変更行はupsertに載せない（他端末で削除済みの行を蘇生させない・通信も最小）
+  global.sb._upsertLog.length = 0
+  await farmRepo.write(KEY, [
+    { key: 'x', label: '端末Aの追加', frequent: false, sort_order: 1 },      // 未変更
+    { key: 'y', label: '端末Bの追加(改名)', frequent: false, sort_order: 2 }, // 変更
+  ])
+  const sent = global.sb._upsertLog.length ? global.sb._upsertLog[0] : []
+  ok('R15 未変更行はupsertに載らない(変更行yのみ送信)',
+    global.sb._upsertLog.length === 1 && sent.length === 1 && sent[0].key === 'y', JSON.stringify(sent.map(s => s.key)))
+
+  // 16) スナップショット未取得(初回読込前)ではdeleteを発行しない＝安全側でupsertのみ
+  delete SupabaseRepository._snap[SK]
+  await farmRepo.write(KEY, [{ key: 'x', label: '端末Aの追加', frequent: false, sort_order: 1 }]) // yに触れない
+  const r16 = await farmRepo.readAsync(KEY)
+  const keys16 = r16.value.map(d => d.key).sort()
+  ok('R16 スナップショット無しではdeleteしない(yが残る)', keys16.join(',') === 'x,y', JSON.stringify(keys16))
   farmRepo.unroute('farm_shipment_destinations')
 
   const pass = checks.filter(c => c.pass).length

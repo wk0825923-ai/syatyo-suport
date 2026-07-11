@@ -89,7 +89,17 @@
   const SupabaseRepository = {
     kind: 'supabase',
     _ctx: { orgId: null, farmIds: null },
+    // 端末が最後に見たDB状態のスナップショット { 'table|farmId': { keyVal: 行JSON } }。
+    // writeはこの差分だけを送る＝他端末が同時に追加した行を「自分の画面に無いから」と消さない(Codex High対応)。
+    _snap: {},
     setContext(ctx) { this._ctx = Object.assign({}, this._ctx, ctx || {}) },
+    _snapshotOf(conv, table, farmId, value) {
+      const keyCol = conv.conflict ? conv.conflict.split(',').map(s => s.trim()).filter(c => c !== 'farm_id')[0] : null
+      if (!keyCol) return null
+      const ns = {}
+      conv.toRows(value, { orgId: this._ctx.orgId, farmId }).forEach(rw => { ns[String(rw[keyCol])] = JSON.stringify(rw) })
+      return ns
+    },
 
     // farm_idがキーから取れて、かつ許可された農場かを検証（誤キー/改竄キーで別農場を触らせない）
     _checkFarm(farmId) {
@@ -111,7 +121,10 @@
       try {
         const { data, error } = await client.from(table).select('*').eq('farm_id', farmId)
         if (error) return { ok: false, found: false, error }
-        return { ok: true, found: true, value: conv.fromRows(data) }
+        const value = conv.fromRows(data)
+        // 読めた=この端末が知るDBの最新状態としてスナップショット更新（次回writeの差分基準）
+        try { const ns = this._snapshotOf(conv, table, farmId, value); if (ns) this._snap[table + '|' + farmId] = ns } catch (_) {}
+        return { ok: true, found: true, value }
       } catch (e) { return { ok: false, found: false, error: e } }
     },
 
@@ -127,20 +140,31 @@
       try {
         const rows = conv.toRows(value, { orgId, farmId })
         if (conv.conflict) {
-          // ── 安全な差分同期: 先にupsert(既存を消さない)→今回に無い行だけdelete ──
-          // insertが途中失敗しても既存データは消えない（Codex Critical対策）。id保持で参照も崩れない。
-          if (rows.length) {
-            const up = await client.from(table).upsert(rows, { onConflict: conv.conflict })
+          // ── 行単位の差分同期(スナップショット基準・Codex High対応) ──
+          // 「前回このwrite元がDBから読んだ状態」との差分だけ送る:
+          //   変更/追加された行のみupsert・スナップショットにあって今回に無い行のみ狙い撃ちdelete。
+          // 現DB全体との突き合わせ(delete not-in)をやめたので、他端末が同時に追加した行は
+          // この端末の画面に無くても消えない。未変更行は送らない＝他端末で削除済みの行を蘇生させない。
+          const keyCol = conv.conflict.split(',').map(s => s.trim()).filter(c => c !== 'farm_id')[0]
+          const snapKey = table + '|' + farmId
+          const snap = this._snap[snapKey] || null
+          const changed = snap ? rows.filter(rw => snap[String(rw[keyCol])] !== JSON.stringify(rw)) : rows
+          if (changed.length) {
+            const up = await client.from(table).upsert(changed, { onConflict: conv.conflict })
             if (up.error) return { ok: false, error: up.error }
           }
-          const keyCol = conv.conflict.split(',').map(s => s.trim()).filter(c => c !== 'farm_id')[0]
-          if (keyCol) {
-            const keys = rows.map(r => r[keyCol])
-            let dq = client.from(table).delete().eq('farm_id', farmId)
-            if (keys.length) dq = dq.not(keyCol, 'in', '(' + keys.map(k => '"' + String(k).replace(/"/g, '') + '"').join(',') + ')')
-            const del = await dq
-            if (del.error) return { ok: false, error: del.error }
+          if (snap && keyCol) {
+            const newKeys = {}
+            rows.forEach(rw => { newKeys[String(rw[keyCol])] = true })
+            const removed = Object.keys(snap).filter(k => !newKeys[k])
+            if (removed.length) {
+              const del = await client.from(table).delete().eq('farm_id', farmId).in(keyCol, removed)
+              if (del.error) return { ok: false, error: del.error }
+            }
           }
+          // ※スナップショット未取得(初回読込前)はupsertのみ・deleteなし＝安全側。
+          //   アプリ経路ではloadedRefガードにより必ずreadAsync成功後にしかwriteされない。
+          try { const ns = this._snapshotOf(conv, table, farmId, value); if (ns) this._snap[snapKey] = ns } catch (_) {}
           return { ok: true }
         }
         // conflictキーが無いコレクション(記録系)は現状フォールバックの全置換。
