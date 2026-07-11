@@ -216,18 +216,18 @@
   }
 
   const router = makeRouter()
-  // ▼ フェーズ4の実切り替えはここに1行ずつ足す。setContextはapp.js起動時に配線済み。
-  // 【段階ロールアウト】まずはフラグ付き端末だけDB経路にして実機検証する:
-  //   URLに ?dbdest=1 を付けて開くとこの端末はON(記憶される)・?dbdest=0 でOFFに戻す。
-  //   全端末切替(既定ON)にする時はフラグ判定を外して route() を無条件にする。
+  // ▼ フェーズ4の実切り替えはここに1テーブルずつ足す。setContextはapp.js起動時に配線済み。
+  // 【既定ON】出荷先マスタはDB経路が既定(2026-07-12・Codexゲート条件=行単位差分同期を実装済み)。
+  //   問題が出た端末は ?dbdest=0 を付けて開くと旧経路(localStorage)へ退避できる(記憶される)。
+  //   ?dbdest=1 で退避を解除。node(QAハーネス)ではrouteしない=テストが自分で管理する。
   try {
     if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
       const q = new URLSearchParams(window.location.search).get('dbdest')
-      if (q === '1') localStorage.setItem('sb_route_dest', '1')
-      if (q === '0') localStorage.removeItem('sb_route_dest')
-      if (localStorage.getItem('sb_route_dest') === '1') router.route('farm_shipment_destinations', SupabaseRepository)
+      if (q === '0') localStorage.setItem('sb_route_dest_off', '1')
+      if (q === '1') localStorage.removeItem('sb_route_dest_off')
+      if (localStorage.getItem('sb_route_dest_off') !== '1') router.route('farm_shipment_destinations', SupabaseRepository)
     }
-  } catch (_) { /* localStorage不可環境では常にlocalStorage経路(=従来挙動) */ }
+  } catch (_) { /* localStorage不可環境では従来挙動(localStorage経路)のまま */ }
 
   global.farmRepo = router
   global.FarmRepositories = { LocalStorageRepository, SupabaseRepository }
