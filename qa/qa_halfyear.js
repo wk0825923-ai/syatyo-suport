@@ -166,7 +166,8 @@ async function run() {
     set('farm_shipment_records',ship)
     // 機械整備: 直近60日以内あり（アラート出ない状態）
     set('farm_maintenance_records',[{ id:1, date:addD(today,-20), machine:'トラクタ1号', machine_no:'T-01', kind:'点検', result:'良好', worker:'中川', note:'' }])
-    return { today, fields:fields.length, records:records.length, sprays:sprays.length, ferts:ferts.length, harvs:harvs.length, totalCases, shipped: ship.reduce((a,s)=>a+s.cases,0) }
+    return { today, fields:fields.length, records:records.length, sprays:sprays.length, ferts:ferts.length, harvs:harvs.length, totalCases,
+      sumShisco: sumBy('シスコ'), sumRaptor: sumBy('ラプトル'), shipped: ship.reduce((a,s)=>a+s.cases,0) }
   }, farmId)
   await page.reload({ waitUntil:'networkidle2' }); await sleep(1500)
 
@@ -241,6 +242,18 @@ async function run() {
     return { high: m?Number(m[1]):null, mid: m2?Number(m2[1]):null, titles: titles.slice(0,8), count: titles.length }
   }, farmId)
   ok('A5 半年の記録で突合せ偽陽性ゼロ', integ.count === 0, JSON.stringify(integ))
+  // D2の正例: 定植前の施肥は「追肥なら検知・元肥/堆肥なら検知しない」を純関数で確認（検知力の退行防止）
+  const d2 = await page.evaluate((fid) => {
+    try {
+      const farmLots = (()=>{ const v=localStorage.getItem('farm_lots_'+fid); return v?JSON.parse(v):{} })()
+      const fields = (()=>{ const v=localStorage.getItem('farm_fields_v2_'+fid); return v?JSON.parse(v):[] })()
+      const mk = t => runFarmIntegrityChecks({ farmLots, fields,
+        topDressingRecords: [{ id:1, field_id:1, date:'2026-03-20', fertilizing_type:t, row_range:'7-12', fertilizers:[] }] })
+        .filter(x => x.title.includes('定植日より前')).length
+      return { tsui: mk('追肥'), moto: mk('元肥'), tai: mk('堆肥') }
+    } catch (e) { return { err: e.message } }
+  }, farmId)
+  ok('A5b D2正例: 定植前施肥は追肥のみ検知(追肥1/元肥0/堆肥0)', d2.tsui === 1 && d2.moto === 0 && d2.tai === 0, JSON.stringify(d2))
 
   // ═══ ③ 全ページ巡回（白画面・エラー・壊れ表示・描画時間） ═══
   phase = 'sweep'
@@ -276,8 +289,8 @@ async function run() {
   ok('C1 圃場まとめの収穫ケース計=' + expectedTotal, hasTotal, '合計出現=' + hasTotal)
   await navClick(page,'出荷記録'); await sleep(800)
   const shipTxt = await page.evaluate(() => (document.querySelector('.main')||document.body).innerText)
-  // ストック残は品種別に表示される: シスコ=546-436=110 / ラプトル=486-388=98
-  const stockShisco = 546 - Math.floor(546*0.8), stockRaptor = 486 - Math.floor(486*0.8)
+  // ストック残は品種別に表示される（収穫合計−出荷8割。値はseedから導出＝シードを変えてもここは追従）
+  const stockShisco = seed.sumShisco - Math.floor(seed.sumShisco*0.8), stockRaptor = seed.sumRaptor - Math.floor(seed.sumRaptor*0.8)
   ok('C2 品種別ストック残(シスコ' + stockShisco + '/ラプトル' + stockRaptor + ')が表示',
      shipTxt.includes(String(stockShisco)) && shipTxt.includes(String(stockRaptor)), 'shisco='+stockShisco+' raptor='+stockRaptor)
 
@@ -292,12 +305,13 @@ async function run() {
   ok('G1 GAPチェックリスト描画・自動達成バッジあり', gap.hasChecks && gap.autoBadges > 0 && !gap.bad, 'auto='+gap.autoBadges)
   await navClick(page,'GAP帳票出力'); await sleep(900)
   const preErr = errors.length
-  await clickByText(page,'eMAFF連携CSV'); await sleep(1500)
-  ok('G2 eMAFF連携CSV出力がエラーなし', errors.length === preErr, errors.slice(preErr).map(e=>e.msg).join(';'))
+  // クリックの成否も条件に入れる（ボタンが見つからず実行されないまま「エラーなし」で合格するsilent pass防止）
+  const csvClicked = await clickByText(page,'eMAFF連携CSV'); await sleep(1500)
+  ok('G2 eMAFF連携CSV出力がエラーなし', csvClicked && errors.length === preErr, 'clicked='+csvClicked+' '+errors.slice(preErr).map(e=>e.msg).join(';'))
   const preErr2 = errors.length
-  await page.evaluate(() => { const b=[...document.querySelectorAll('button')].filter(e=>e.offsetParent&&/PDF/.test(e.textContent)); if(b[0])b[0].click() })
+  const pdfClicked = await page.evaluate(() => { const b=[...document.querySelectorAll('button')].filter(e=>e.offsetParent&&/PDF/.test(e.textContent)); if(b[0]){b[0].click(); return true} return false })
   await sleep(4000) // 遅延ロード込み
-  ok('G3 帳票PDF生成がエラーなし（遅延ロード込み）', errors.length === preErr2, errors.slice(preErr2).map(e=>e.msg).join(';'))
+  ok('G3 帳票PDF生成がエラーなし（遅延ロード込み）', pdfClicked && errors.length === preErr2, 'clicked='+pdfClicked+' '+errors.slice(preErr2).map(e=>e.msg).join(';'))
   await navClick(page,'必要書類・文書台帳'); await sleep(800)
   const docs = await scanPage(page)
   ok('G4 文書台帳が描画', docs.hasMain && docs.len > 200 && !docs.bad)
