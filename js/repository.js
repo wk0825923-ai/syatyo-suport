@@ -180,6 +180,8 @@
       route(collection, repo) { routes[collection] = repo; return this },
       unroute(collection) { delete routes[collection]; return this },
       setContext(ctx) { SupabaseRepository.setContext(ctx); return this },
+      // 非同期ソース(DB)か？ usePersistStateが「初回読込完了までwrite保留」ガードの要否判定に使う
+      isAsync(key) { return pick(key).kind === 'supabase' },
       readSync(key) { const r = pick(key); return r.readSync ? r.readSync(key) : { ok: true, found: false } },
       readAsync(key) { const r = pick(key); return Promise.resolve(r.readAsync ? r.readAsync(key) : r.readSync(key)) },
       write(key, value) { return pick(key).write(key, value) },
@@ -188,9 +190,18 @@
   }
 
   const router = makeRouter()
-  // ▼ フェーズ4の実切り替えはここに1行ずつ足す（実運用開始時）。例:
-  //   router.setContext({ orgId }); router.route('farm_shipment_destinations', SupabaseRepository)
-  // いまは何もrouteしない＝全コレクションが localStorage（挙動は完全に今まで通り）。
+  // ▼ フェーズ4の実切り替えはここに1行ずつ足す。setContextはapp.js起動時に配線済み。
+  // 【段階ロールアウト】まずはフラグ付き端末だけDB経路にして実機検証する:
+  //   URLに ?dbdest=1 を付けて開くとこの端末はON(記憶される)・?dbdest=0 でOFFに戻す。
+  //   全端末切替(既定ON)にする時はフラグ判定を外して route() を無条件にする。
+  try {
+    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+      const q = new URLSearchParams(window.location.search).get('dbdest')
+      if (q === '1') localStorage.setItem('sb_route_dest', '1')
+      if (q === '0') localStorage.removeItem('sb_route_dest')
+      if (localStorage.getItem('sb_route_dest') === '1') router.route('farm_shipment_destinations', SupabaseRepository)
+    }
+  } catch (_) { /* localStorage不可環境では常にlocalStorage経路(=従来挙動) */ }
 
   global.farmRepo = router
   global.FarmRepositories = { LocalStorageRepository, SupabaseRepository }

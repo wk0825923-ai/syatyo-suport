@@ -1,6 +1,8 @@
-// qa_persist_race.js — usePersistState の「遅延初期ロード vs リモート更新」レース検証（Node・モックReact）
-// 対象: js/components.js の usePersistState。remoteRef 追加で、subscribe経由のリモート更新の後に
-// 遅れて届いた古い readAsync 結果が state を巻き戻さないことを確認する。
+// qa_persist_race.js — usePersistState のレース＋読込前write保留ガード検証（Node・モックReact）
+// 対象: js/components.js の usePersistState。
+//  - remoteRef: subscribe経由のリモート更新後、遅延した readAsync の古い値で巻き戻さない
+//  - loadedRef: DB経路(isAsync)では初回読込完了までユーザー編集を保留（初期値ベースの全置換でDBを壊さない）
+//  - dirtyRef : localStorage経路の従来ガード維持（編集後の遅延ロードで巻き戻さない）
 // 実行: cd qa && node qa_persist_race.js
 const fs = require('fs')
 const path = require('path')
@@ -78,13 +80,17 @@ function makeRuntime() {
 }
 
 // ── モックfarmRepo: readAsyncは手動resolve（遅延を再現）・subscribeはコールバックを外に晒す ──
-function makeMockRepo() {
+// asyncMode=true でDB経路(isAsync→writeガード対象)、false でlocalStorage経路を再現。
+function makeMockRepo(asyncMode) {
   let resolveRead = null
   let subCb = null
+  const writes = []
   return {
+    writes,
+    isAsync() { return !!asyncMode },
     readSync() { return { ok: true, found: false, value: undefined } },
     readAsync() { return new Promise(r => { resolveRead = r }) },
-    write() { return Promise.resolve({ ok: true }) },
+    write(key, value) { writes.push(value); return Promise.resolve({ ok: true }) },
     subscribe(key, cb) { subCb = cb; return () => { subCb = null } },
     fireRemote(value) { if (subCb) subCb(value, { found: true }) },
     resolveInitialLoad(r) { if (resolveRead) { const f = resolveRead; resolveRead = null; f(r) } },
@@ -92,14 +98,20 @@ function makeMockRepo() {
 }
 
 const tick = () => new Promise(r => setImmediate(r))
+const build = (repo) => {
+  const rt = makeRuntime()
+  const toasts = []
+  const showToast = (msg) => toasts.push(msg)
+  const usePersistState = new Function('React', 'farmRepo', 'showToast', 'window', 'return ' + fnSrc)(rt.React, repo, showToast, {})
+  rt.mount(() => usePersistState('farm_x_1', ['initial']))
+  return { rt, toasts }
+}
 
 ;(async () => {
-  // R1: リモート更新が先→遅延初期ロード(古い値)が後 → 巻き戻らない（今回の修正の本丸）
+  // R1: [DB経路] リモート更新が先→遅延初期ロード(古い値)が後 → 巻き戻らない
   {
-    const rt = makeRuntime()
-    const repo = makeMockRepo()
-    const usePersistState = new Function('React', 'farmRepo', 'showToast', 'window', 'return ' + fnSrc)(rt.React, repo, () => {}, {})
-    rt.mount(() => usePersistState('farm_x_1', ['initial']))
+    const repo = makeMockRepo(true)
+    const { rt } = build(repo)
     repo.fireRemote(['remote-new'])                        // ①リモート更新が届く
     repo.resolveInitialLoad({ ok: true, found: true, value: ['stale-db'] }) // ②古い初期ロードが遅れて到着
     await tick()
@@ -107,42 +119,88 @@ const tick = () => new Promise(r => setImmediate(r))
     ok('R1: リモート更新後の遅延初期ロードで巻き戻らない', state[0] === 'remote-new', 'state=' + JSON.stringify(state))
   }
 
-  // R2: リモート更新が無い通常時 → 初期ロードの値はちゃんと反映される（ガードが効きすぎない）
+  // R2: [DB経路] リモート更新が無い通常時 → 初期ロードの値はちゃんと反映される
   {
-    const rt = makeRuntime()
-    const repo = makeMockRepo()
-    const usePersistState = new Function('React', 'farmRepo', 'showToast', 'window', 'return ' + fnSrc)(rt.React, repo, () => {}, {})
-    rt.mount(() => usePersistState('farm_x_1', ['initial']))
+    const repo = makeMockRepo(true)
+    const { rt } = build(repo)
     repo.resolveInitialLoad({ ok: true, found: true, value: ['db-value'] })
     await tick()
     const [state] = rt.result
     ok('R2: 通常時は初期ロードの値が反映される', state[0] === 'db-value', 'state=' + JSON.stringify(state))
   }
 
-  // R3: ユーザー編集が先→遅延初期ロードが後 → 既存dirtyRefガードが引き続き効く（デグレなし）
+  // R3: [DB経路] 初回読込前の編集は保留（write発生なし・トースト表示）→ 読込後の編集は通る
   {
-    const rt = makeRuntime()
-    const repo = makeMockRepo()
-    const usePersistState = new Function('React', 'farmRepo', 'showToast', 'window', 'return ' + fnSrc)(rt.React, repo, () => {}, {})
-    rt.mount(() => usePersistState('farm_x_1', ['initial']))
+    const repo = makeMockRepo(true)
+    const { rt, toasts } = build(repo)
     const [, setPersist] = rt.result
-    setPersist(['user-edit'])
+    setPersist(['too-early'])                              // ①読込前に編集 → 保留されるべき
+    await tick()
+    const blockedState = rt.result[0]
+    const blockedWrites = repo.writes.length
+    repo.resolveInitialLoad({ ok: true, found: true, value: ['db-value'] }) // ②読込完了
+    await tick()
+    rt.result[1](['after-load'])                           // ③読込後の編集 → 通るべき
+    await tick()
+    const [state] = rt.result
+    ok('R3a: 読込前の編集は保留される(state不変・write0件・トースト有)',
+      blockedState[0] === 'initial' && blockedWrites === 0 && toasts.length === 1,
+      'state=' + JSON.stringify(blockedState) + ' writes=' + blockedWrites + ' toasts=' + toasts.length)
+    ok('R3b: 読込完了後の編集は通ってwriteされる',
+      state[0] === 'after-load' && repo.writes.length === 1 && repo.writes[0][0] === 'after-load',
+      'state=' + JSON.stringify(state) + ' writes=' + repo.writes.length)
+  }
+
+  // R4: [DB経路] リモート更新がstateに反映され、その後の編集は解禁される(リモート値=DB現在値)
+  {
+    const repo = makeMockRepo(true)
+    const { rt } = build(repo)
+    repo.fireRemote(['remote-value'])
+    await tick()
+    const afterRemote = rt.result[0]
+    rt.result[1](['edit-after-remote'])
+    await tick()
+    const [state] = rt.result
+    ok('R4: リモート更新が反映され、その後の編集も解禁される',
+      afterRemote[0] === 'remote-value' && state[0] === 'edit-after-remote' && repo.writes.length === 1,
+      'afterRemote=' + JSON.stringify(afterRemote) + ' state=' + JSON.stringify(state))
+  }
+
+  // R5: [localStorage経路] 同期読み済みなので編集は即時に通る（ガードが誤発動しない＝従来挙動不変）
+  {
+    const repo = makeMockRepo(false)
+    const { rt, toasts } = build(repo)
+    rt.result[1](['instant-edit'])
+    await tick()
+    const [state] = rt.result
+    ok('R5: localStorage経路は読込待ちなしで編集できる(従来挙動)',
+      state[0] === 'instant-edit' && repo.writes.length === 1 && toasts.length === 0,
+      'state=' + JSON.stringify(state) + ' toasts=' + toasts.length)
+  }
+
+  // R6: [localStorage経路] 編集後に遅延readAsyncの古い値が届いても巻き戻らない(dirtyRef維持)
+  {
+    const repo = makeMockRepo(false)
+    const { rt } = build(repo)
+    rt.result[1](['user-edit'])
     repo.resolveInitialLoad({ ok: true, found: true, value: ['stale-db'] })
     await tick()
     const [state] = rt.result
-    ok('R3: ユーザー編集後の遅延初期ロードで巻き戻らない(既存ガード維持)', state[0] === 'user-edit', 'state=' + JSON.stringify(state))
+    ok('R6: 編集後の遅延初期ロードで巻き戻らない(dirtyRef維持)', state[0] === 'user-edit', 'state=' + JSON.stringify(state))
   }
 
-  // R4: リモート更新自体はstateに反映される（ガードを足しても購読追随は生きている）
+  // R7: [DB経路] 初回読込が失敗(オフライン等)した場合は編集は保留のまま（書けない状況で状態だけ進めない）
   {
-    const rt = makeRuntime()
-    const repo = makeMockRepo()
-    const usePersistState = new Function('React', 'farmRepo', 'showToast', 'window', 'return ' + fnSrc)(rt.React, repo, () => {}, {})
-    rt.mount(() => usePersistState('farm_x_1', ['initial']))
-    repo.fireRemote(['remote-value'])
+    const repo = makeMockRepo(true)
+    const { rt, toasts } = build(repo)
+    repo.resolveInitialLoad({ ok: false, found: false, error: new Error('offline') })
+    await tick()
+    rt.result[1](['edit-while-offline'])
     await tick()
     const [state] = rt.result
-    ok('R4: リモート更新がstateに反映される', state[0] === 'remote-value', 'state=' + JSON.stringify(state))
+    ok('R7: 読込失敗中の編集は保留(初期値のまま・write0件)',
+      state[0] === 'initial' && repo.writes.length === 0 && toasts.length === 1,
+      'state=' + JSON.stringify(state) + ' writes=' + repo.writes.length)
   }
 
   const pass = checks.filter(c => c.pass).length

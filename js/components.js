@@ -16781,18 +16781,29 @@ function usePersistState(key, initial) {
   const dirtyRef = React.useRef(false)
   // リモート更新フラグ: subscribe経由で新しい値を受け取った後は、遅延した初期ロードで巻き戻さない。
   const remoteRef = React.useRef(false)
+  // 初回読込完了フラグ: DB経路(非同期ソース)ではDBの現在値が届く前の編集を保留する。
+  // 届く前に書くと「初期値ベースの内容」で差分deleteが走りDB側にしかない行が消えるため（読込前write事故防止）。
+  // localStorage経路は同期読み済み(=常にloaded)なので従来挙動のまま。
+  const loadedRef = React.useRef(!(farmRepo.isAsync && farmRepo.isAsync(key)))
   // 非同期ソース（Supabase）からの初期ロード。localStorageは同期で読めているので実質no-op。
   React.useEffect(() => {
     let alive = true
     dirtyRef.current = false // 別コレクション(key変更)に切り替わったら未編集から開始
     remoteRef.current = false // key変更時はリモート更新もリセット
+    loadedRef.current = !(farmRepo.isAsync && farmRepo.isAsync(key)) // key変更時は読込状態も判定し直す
     Promise.resolve(farmRepo.readAsync ? farmRepo.readAsync(key) : null).then(r => {
+      if (r && r.ok) loadedRef.current = true // 読込成功=以降の編集を許可（失敗時は保留のまま=オフライン等で書けない状況と一致）
       // 遅れて届いた古いDB値でユーザーの編集・リモート更新を潰さない（stale overwrite対策）
       if (alive && !dirtyRef.current && !remoteRef.current && r && r.ok && r.found) setState(r.value)
     }).catch(() => {})
     return () => { alive = false }
   }, [key])
   const setPersist = React.useCallback(updater => {
+    // DB経路で初回読込が終わる前の編集は受け付けない（初期値ベースの全置換でDBを壊さない・数秒の話）
+    if (!loadedRef.current) {
+      try { showToast('データを読み込み中です。少し待ってからもう一度お試しください。', 'error') } catch (_) {}
+      return
+    }
     dirtyRef.current = true // この瞬間以降、初期ロードでの上書きを禁止
     setState(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater
@@ -16813,6 +16824,7 @@ function usePersistState(key, initial) {
   React.useEffect(() => {
     const unsubscribe = farmRepo.subscribe(key, (value, meta) => {
       remoteRef.current = true // 以降、遅延した初期ロードでこのリモート更新を上書きさせない
+      loadedRef.current = true // リモート更新=DBの現在値が届いた＝編集を解禁してよい
       setState(meta && meta.found ? value : initial)
     })
     return unsubscribe
