@@ -16764,36 +16764,44 @@ function ShipmentLogPage({ shipmentRecords, harvestRecords, fields, destinations
 // =====================================================
 
 // LS-01: localStorage 永続化ヘルパー
-// 【フェーズ2】localStorageを直接触らず farmRepo（変換アダプタ）経由にする。
-// 呼び出し側(useFPS 26箇所)は無変更・挙動も同じ。フェーズ4でfarmRepoの中身をSupabaseに差し替える。
+// 【フェーズ2〜4】localStorageを直接触らず farmRepo（変換アダプタ/ルーター）経由にする。
+// 呼び出し側(useFPS 26箇所)は無変更。localStorage経路は同期即読み＝挙動不変。
+// Supabaseに切り替えたコレクションだけ、初期値で描き始め→非同期でDBから最新化＋リアルタイム購読。
 function usePersistState(key, initial) {
   const [state, setState] = React.useState(() => {
-    const r = farmRepo.read(key)
-    if (!r.ok) {
-      // 破損データは初期値に戻すが、握り潰さず必ず警告（引き継ぎ時の調査のため）
-      console.warn('[usePersistState] 読込失敗（初期値に復帰）:', key, r.error)
+    // 同期読み（localStorage）。DB経路は found:false で初期値スタート→下のeffectで最新化。
+    const r = farmRepo.readSync ? farmRepo.readSync(key) : farmRepo.read(key)
+    if (!r || !r.ok) {
+      if (r && r.error) console.warn('[usePersistState] 読込失敗（初期値に復帰）:', key, r.error)
       return initial
     }
     return r.found ? r.value : initial
   })
+  // 非同期ソース（Supabase）からの初期ロード。localStorageは同期で読めているので実質no-op。
+  React.useEffect(() => {
+    let alive = true
+    Promise.resolve(farmRepo.readAsync ? farmRepo.readAsync(key) : null).then(r => {
+      if (alive && r && r.ok && r.found) setState(r.value)
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [key])
   const setPersist = React.useCallback(updater => {
     setState(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater
-      const w = farmRepo.write(key, next)
-      if (!w.ok) {
-        // 保存失敗（多くは容量超過）は"見える化"する。データ消失に気づけないのが最大のリスクのため。
-        console.warn('[usePersistState] 保存失敗:', key, w.error)
-        if (typeof window !== 'undefined' && !window.__storageWarned) {
-          window.__storageWarned = true
-          try { showToast('データの保存に失敗しました。ブラウザの空き容量が不足している可能性があります。写真を減らすか不要なデータを整理してください。', 'error') } catch (_) {}
+      // 楽観的更新: 画面は即反映。永続化は成否を受け取り、失敗時だけ"見える化"する（Codex #04の土台）。
+      Promise.resolve(farmRepo.write(key, next)).then(w => {
+        if (w && !w.ok) {
+          console.warn('[usePersistState] 保存失敗:', key, w.error)
+          if (typeof window !== 'undefined' && !window.__storageWarned) {
+            window.__storageWarned = true
+            try { showToast('データの保存に失敗しました。ブラウザの空き容量が不足している可能性があります。写真を減らすか不要なデータを整理してください。', 'error') } catch (_) {}
+          }
         }
-      }
+      }).catch(e => { console.warn('[usePersistState] 保存失敗:', key, e) })
       return next
     })
   }, [key])
-  // 【同時利用の手戻り防止】管理者とスタッフが同じ農場を別タブで開いている時、片方の保存が
-  // もう片方の in-memory state で上書きされて消える(last-write-win)のを防ぐ。別タブ(将来はリアルタイム)が
-  // 同じキーを更新したら自分の state も最新に追随させる（次の保存が古い状態を書き戻さない）。
+  // 【同時利用の手戻り防止】別タブ(将来はSupabaseリアルタイム)が同じキーを更新したら自分のstateも追随。
   React.useEffect(() => {
     const unsubscribe = farmRepo.subscribe(key, (value, meta) => {
       setState(meta && meta.found ? value : initial)

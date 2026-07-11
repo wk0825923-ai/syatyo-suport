@@ -1,57 +1,173 @@
 // =====================================================
-// repository.js — データの出し入れを1か所に集約する「変換アダプタ」（フルスタック移行フェーズ2）
+// repository.js — データの出し入れを1か所に集約する「変換アダプタ」（フルスタック移行フェーズ2〜4）
 //
-// ねらい: アプリ画面は「farmRepo という窓口」の read / write / subscribe だけを見る。
-//   いまは窓口の中身が localStorage（今までと全く同じ挙動）。
-//   フェーズ4で、この中身をテーブルごとに Supabase へ差し替えれば、
-//   画面を1行も変えずに本物のDBへ移行できる（＝海外の電源変換アダプタと同じ発想）。
+// ねらい: アプリ画面は「farmRepo という窓口」だけを見る。窓口の中身(localStorage/Supabase)は
+//   キー単位で差し替えられる。差し替えても画面は1行も変わらない（＝電源変換アダプタ）。
 //
-// 契約(interface): どの実装も必ずこの3つを持つ。
-//   read(key)          -> { ok, found, value, error }   同期的に読む
-//   write(key, value)  -> { ok, error }                 保存の成否を返す（保存できてから成功表示する土台）
-//   subscribe(key, cb) -> unsubscribe()                 別の場所での更新を購読（別タブ同期／将来はリアルタイム）
+// 契約(interface): どの実装も次を持つ。
+//   readSync(key)      -> { ok, found, value, error }         同期読み（localStorageのみ・初期表示のちらつき防止）
+//   readAsync(key)     -> Promise<{ ok, found, value, error }> 非同期読み（Supabase/localStorage共通）
+//   write(key, value)  -> { ok, error } または Promise<同>     保存成否を返す
+//   subscribe(key, cb) -> unsubscribe()                        別の場所での更新を購読（別タブ同期 / リアルタイム）
 // =====================================================
 (function (global) {
   'use strict'
 
-  // ── 実装その1: localStorage（現状維持。移行が終わるまでの土台） ──
+  // ── コレクション名⇔テーブル対応（フェーズ1の照合表） ──
+  // key は 'farm_xxx_<farmId(uuid)>' 形式。末尾uuidを外した部分がコレクション名。
+  const KEY_TABLE = {
+    farm_fields_v2: 'farm_fields', farm_staff: 'farm_staff',
+    farm_pesticides: 'farm_pesticides', farm_fertilizers: 'farm_fertilizers',
+    farm_crop_categories: 'farm_crop_categories', farm_shipment_destinations: 'farm_shipment_destinations',
+    farm_lots: 'farm_lots', farm_records: 'farm_work_records',
+    farm_lot_spray_records: 'farm_lot_spray_records', farm_top_dressing_records: 'farm_top_dressing_records',
+    farm_harvest_records: 'farm_harvest_records', farm_shipment_records: 'farm_shipment_records',
+    farm_maintenance_records: 'farm_maintenance_records', farm_trainee_diaries: 'farm_trainee_diaries',
+    farm_today_tasks: 'farm_today_tasks', farm_rentals: 'farm_rentals', farm_crop_plans: 'farm_crop_plans',
+    farm_pesticide_purchases: 'farm_pesticide_purchases', farm_fertilizer_purchases: 'farm_fertilizer_purchases',
+    farm_gap: 'farm_gap_checks', farm_gap_documents: 'farm_gap_documents', farm_monthly_temps: 'farm_monthly_temps',
+    farm_field_performance_comments: 'farm_field_performance_comments', farm_crop_comments: 'farm_crop_comments',
+  }
+  const UUID_TAIL = /_([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/
+  const collectionOf = (key) => key.replace(UUID_TAIL, '')
+  const farmIdOf = (key) => { const m = key.match(UUID_TAIL); return m ? m[1] : null }
+
+  // ── 実装その1: localStorage（現状維持の土台） ──
   const LocalStorageRepository = {
     kind: 'localStorage',
-
-    read(key) {
+    readSync(key) {
       try {
         const raw = localStorage.getItem(key)
         return { ok: true, found: raw != null, value: raw != null ? JSON.parse(raw) : undefined }
       } catch (e) {
-        // 破損データは呼び出し側で初期値に戻す。握り潰さず error を返す（引き継ぎ時の調査のため）
         return { ok: false, found: false, value: undefined, error: e }
       }
     },
-
+    read(key) { return this.readSync(key) }, // 後方互換
+    readAsync(key) { return Promise.resolve(this.readSync(key)) },
     write(key, value) {
-      try {
-        localStorage.setItem(key, JSON.stringify(value))
-        return { ok: true }
-      } catch (e) {
-        // 保存失敗（多くは容量超過）は ok:false で返す。呼び出し側が"見える化"する。
-        return { ok: false, error: e }
-      }
+      try { localStorage.setItem(key, JSON.stringify(value)); return { ok: true } }
+      catch (e) { return { ok: false, error: e } }
     },
-
     subscribe(key, cb) {
       if (typeof window === 'undefined') return function () {}
       const handler = function (e) {
         if (e.key !== key) return
         try { cb(e.newValue != null ? JSON.parse(e.newValue) : undefined, { found: e.newValue != null }) }
-        catch (_) { /* 壊れた値は無視（現状維持） */ }
+        catch (_) { /* 壊れた値は無視 */ }
       }
       window.addEventListener('storage', handler)
       return function () { window.removeEventListener('storage', handler) }
     },
   }
 
-  // 現在アクティブな窓口。フェーズ4ではここを差し替える（あるいはキー別に振り分ける）だけ。
-  global.farmRepo = LocalStorageRepository
-  // 実装の入れ物（将来 SupabaseRepository をここに足す）
-  global.FarmRepositories = { LocalStorageRepository }
-})(typeof window !== 'undefined' ? window : this)
+  // ── コレクションごとの「DB行⇔アプリ形」変換（フェーズ4で1テーブルずつ実装して横展開） ──
+  // アプリはコレクション全体(配列/オブジェクト)を扱う。DBは行の集合。両者を相互変換する。
+  const CONVERTERS = {
+    // 出荷先マスタ（参照なし・列名もほぼ一致＝最初に切り替える一番やさしいテーブル）
+    farm_shipment_destinations: {
+      toRows(value, ctx) {
+        return (Array.isArray(value) ? value : []).map(d => ({
+          org_id: ctx.orgId, farm_id: ctx.farmId,
+          key: String(d.key == null ? '' : d.key), label: String(d.label == null ? '' : d.label),
+          frequent: !!d.frequent, sort_order: Number.isFinite(Number(d.sort_order)) ? Math.trunc(Number(d.sort_order)) : 0,
+        }))
+      },
+      fromRows(rows) {
+        return (rows || [])
+          .slice().sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+          .map(r => ({ key: r.key, label: r.label, frequent: !!r.frequent, sort_order: r.sort_order || 0 }))
+      },
+    },
+  }
+
+  const getSb = () => (typeof sb !== 'undefined' && sb) ? sb
+    : (typeof global !== 'undefined' && global.sb) ? global.sb : null
+
+  // ── 実装その2: Supabase（本物のDB。端末をまたいで同期する） ──
+  const SupabaseRepository = {
+    kind: 'supabase',
+    _ctx: { orgId: null },
+    setContext(ctx) { this._ctx = Object.assign({}, this._ctx, ctx || {}) },
+
+    // 同期読みは非対応（DBは非同期）。初期値で描き始め、readAsyncで最新化する。
+    readSync() { return { ok: true, found: false, value: undefined } },
+
+    async readAsync(key) {
+      const collection = collectionOf(key), farmId = farmIdOf(key)
+      const table = KEY_TABLE[collection], conv = CONVERTERS[collection]
+      const client = getSb()
+      if (!table || !conv || !client) return { ok: false, found: false, error: new Error('未対応コレクション: ' + collection) }
+      try {
+        const { data, error } = await client.from(table).select('*').eq('farm_id', farmId)
+        if (error) return { ok: false, found: false, error }
+        return { ok: true, found: true, value: conv.fromRows(data) }
+      } catch (e) { return { ok: false, found: false, error: e } }
+    },
+
+    // コレクション全置換（自farm分をdelete→検品済み行をinsert）。マスタなど件数が少ない前提。
+    // 記録が大量になったらCRUD粒度へ（社長領域）。
+    async write(key, value) {
+      const collection = collectionOf(key), farmId = farmIdOf(key)
+      const table = KEY_TABLE[collection], conv = CONVERTERS[collection]
+      const client = getSb()
+      if (!table || !conv || !client) return { ok: false, error: new Error('未対応コレクション: ' + collection) }
+      try {
+        const rows = conv.toRows(value, { orgId: this._ctx.orgId, farmId })
+        const del = await client.from(table).delete().eq('farm_id', farmId)
+        if (del.error) return { ok: false, error: del.error }
+        if (rows.length) { const ins = await client.from(table).insert(rows); if (ins.error) return { ok: false, error: ins.error } }
+        return { ok: true }
+      } catch (e) { return { ok: false, error: e } }
+    },
+
+    subscribe(key, cb) {
+      const collection = collectionOf(key), farmId = farmIdOf(key)
+      const table = KEY_TABLE[collection]
+      const client = getSb()
+      if (!table || !client || !client.channel) return function () {}
+      try {
+        const ch = client.channel('rt_' + table + '_' + farmId)
+          .on('postgres_changes', { event: '*', schema: 'public', table: table, filter: 'farm_id=eq.' + farmId }, async () => {
+            const r = await SupabaseRepository.readAsync(key)
+            if (r.ok && r.found) cb(r.value, { found: true })
+          })
+          .subscribe()
+        return function () { try { client.removeChannel(ch) } catch (_) {} }
+      } catch (e) { return function () {} }
+    },
+  }
+
+  // ── ルーター: キー(コレクション)ごとに実装を振り分ける窓口 ──
+  // 既定は全部 localStorage（＝今の挙動）。route() で特定コレクションだけ Supabase へ向ける。
+  function makeRouter() {
+    const routes = {} // collection -> repository
+    const pick = (key) => routes[collectionOf(key)] || LocalStorageRepository
+    return {
+      kind: 'router',
+      routes,
+      route(collection, repo) { routes[collection] = repo; return this },
+      unroute(collection) { delete routes[collection]; return this },
+      setContext(ctx) { SupabaseRepository.setContext(ctx); return this },
+      readSync(key) { const r = pick(key); return r.readSync ? r.readSync(key) : { ok: true, found: false } },
+      readAsync(key) { const r = pick(key); return Promise.resolve(r.readAsync ? r.readAsync(key) : r.readSync(key)) },
+      write(key, value) { return pick(key).write(key, value) },
+      subscribe(key, cb) { return pick(key).subscribe(key, cb) },
+    }
+  }
+
+  const router = makeRouter()
+  // ▼ フェーズ4の実切り替えはここに1行ずつ足す（実運用開始時）。例:
+  //   router.setContext({ orgId }); router.route('farm_shipment_destinations', SupabaseRepository)
+  // いまは何もrouteしない＝全コレクションが localStorage（挙動は完全に今まで通り）。
+
+  global.farmRepo = router
+  global.FarmRepositories = { LocalStorageRepository, SupabaseRepository }
+  global.FarmRepoInternals = { KEY_TABLE, CONVERTERS, collectionOf, farmIdOf, makeRouter }
+})(typeof window !== 'undefined' ? window : (typeof global !== 'undefined' ? global : this))
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = (typeof global !== 'undefined')
+    ? { farmRepo: global.farmRepo, FarmRepositories: global.FarmRepositories, FarmRepoInternals: global.FarmRepoInternals }
+    : {}
+}
