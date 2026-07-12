@@ -73,9 +73,9 @@ const login = async (page) => {
       'count=' + (after && after.value ? after.value.length : 'x') + ' keys=' + JSON.stringify((after.value || []).map(d => d.key)))
 
     // ── 横展開テーブル: gap_documents / monthly_temps の本番往復（テストデータは自分で消す） ──
-    const routes3 = await A.evaluate(() => ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records']
+    const routes3 = await A.evaluate(() => ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records', 'farm_shipment_records']
       .map(c => (farmRepo.routes[c] || {}).kind || 'none').join(','))
-    ok('C1: 4コレクションともDB経路にroute', routes3 === 'supabase,supabase,supabase,supabase', routes3)
+    ok('C1: 5コレクションともDB経路にroute', routes3 === 'supabase,supabase,supabase,supabase,supabase', routes3)
 
     const gRes = await A.evaluate(async () => {
       const k = 'farm_gap_documents_' + CONFIG.CURRENT_FARM_ID
