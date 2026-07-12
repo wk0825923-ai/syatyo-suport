@@ -130,6 +130,36 @@
         return out
       },
     },
+    // 農薬マスタ(マスタUUID化第1弾): id(uuid)をそのまま衝突キーにした行単位差分同期。
+    // 在庫列(stock_l/alert_threshold_l)はtoRowsに含めない＝DB側の残高を上書きしない(在庫は在庫RPCフェーズで統合)。
+    farm_pesticides: {
+      conflict: 'id', // PK衝突でupsert=id保持(参照が崩れない)
+      toRows(value, ctx) {
+        const iv = (v) => (v == null || v === '' || !Number.isFinite(Number(v))) ? null : Math.trunc(Number(v))
+        const nv = (v) => (v == null || v === '' || !Number.isFinite(Number(v))) ? null : Number(v)
+        return (Array.isArray(value) ? value : []).map(p => ({
+          id: String(p.id), org_id: ctx.orgId, farm_id: ctx.farmId,
+          name: String(p.name == null ? '' : p.name),
+          reg_no: String(p.reg_no == null ? '' : p.reg_no),
+          dilution: nv(p.dilution), max_times: iv(p.max_times), preharvest_days: iv(p.preharvest_days),
+          target_crop: String(p.target_crop == null ? '' : p.target_crop),
+          legacy_id: (typeof p.legacy_id === 'number') ? p.legacy_id : null,
+        }))
+      },
+      fromRows(rows) {
+        return (rows || []).map(r => {
+          const out = {
+            id: r.id, name: r.name || '', reg_no: r.reg_no || '',
+            dilution: r.dilution != null ? Number(r.dilution) : null,
+            max_times: r.max_times != null ? Number(r.max_times) : null,
+            preharvest_days: r.preharvest_days != null ? Number(r.preharvest_days) : null,
+            target_crop: r.target_crop || '',
+          }
+          if (r.legacy_id != null) out.legacy_id = Number(r.legacy_id) // masterByIdの旧数値ID解決に使う
+          return out
+        })
+      },
+    },
     // 整備記録(記録系CRUDパイロット): 1行単位のcreate/update/remove専用。write()全置換は禁止。
     // 記録IDはクライアント発行のUUID。旧数値IDは移行時にlegacy_idへ。versionは楽観ロック用。
     farm_maintenance_records: {
@@ -448,7 +478,7 @@
   //   ?dbdest=1 で退避を解除。node(QAハーネス)ではrouteしない=テストが自分で管理する。
   //   localhost(ブラウザQAハーネス環境)は既定OFF: 約45本のハーネスがlocalStorage直注入の従来挙動を
   //   前提にしているため。localhostでDB経路を試す時だけ ?dbdest=1 を付ける。DB経路の検証はqa_dbdest_live担当。
-  const ROUTED_COLLECTIONS = ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records', 'farm_shipment_records']
+  const ROUTED_COLLECTIONS = ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records', 'farm_shipment_records', 'farm_pesticides']
   try {
     if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
       const q = new URLSearchParams(window.location.search).get('dbdest')

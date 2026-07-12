@@ -190,7 +190,7 @@
   const adjustStock = (pesticideId, deltaL) => {
     if (!pesticideId || !deltaL) return
     setPesticideStock(prev => prev.map(s =>
-      s.pesticide_id === Number(pesticideId)
+      String(s.pesticide_id) === String(pesticideId) // UUID/旧数値ID両対応(Number()はUUIDでNaN化するため禁止)
         ? { ...s, stock_L: Math.round((s.stock_L - deltaL) * 100) / 100 }
         : s
     ))
@@ -279,7 +279,7 @@
     const entry = { ...purchase, id: Date.now() }
     setPesticidePurchases(prev => [...prev, entry])
     setPesticideStock(prev => prev.map(s =>
-      s.pesticide_id === Number(purchase.pesticide_id)
+      String(s.pesticide_id) === String(purchase.pesticide_id)
         ? { ...s, stock_L: Math.round((s.stock_L + Number(purchase.amount_L)) * 100) / 100 }
         : s
     ))
@@ -320,7 +320,8 @@
   // （これが無いと仕入れ登録・棚卸しの更新が pesticideStock.map() でヒットせず、
   //   カードの在庫表示に反映されない不具合になる）
   const onAddPesticide = (p) => {
-    const newId = Date.now()
+    // マスタUUID化: 新規農薬はUUIDを発行(Date.now()は複数端末で衝突・DBのuuid列に入らない)
+    const newId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())
     setPesticides(prev => [...prev, { ...p, id: newId }])
     setPesticideStock(prev => [...prev, {
       pesticide_id:       newId,
@@ -329,15 +330,15 @@
     }])
     celebrateSave('農薬を登録！')
   }
-  const onUpdatePesticide = (p) => setPesticides(prev => prev.map(x => x.id === p.id ? p : x))
+  const onUpdatePesticide = (p) => setPesticides(prev => prev.map(x => String(x.id) === String(p.id) ? p : x))
   const onDeletePesticide = (id) => {
-    setPesticides(prev => prev.filter(p => p.id !== id))
-    setPesticideStock(prev => prev.filter(s => s.pesticide_id !== id))
+    setPesticides(prev => prev.filter(p => String(p.id) !== String(id)))
+    setPesticideStock(prev => prev.filter(s => String(s.pesticide_id) !== String(id)))
   }
   // 棚卸し: 在庫量を直接更新
   const onUpdateStock = (pesticideId, newStockL) => {
     setPesticideStock(prev => prev.map(s =>
-      s.pesticide_id === pesticideId
+      String(s.pesticide_id) === String(pesticideId)
         ? { ...s, stock_L: Math.round(newStockL * 100) / 100 }
         : s
     ))

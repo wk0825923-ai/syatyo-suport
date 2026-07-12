@@ -402,6 +402,22 @@ const ROW_STATUS_CONFIG = {
   fallow:    { label:'休耕',     color:'#6B7280', bg:'#F8FAFC' },
 }
 const LOTS = {}
+
+// =====================================================
+// 【マスタ突合の標準ヘルパー】masterById（マスタUUID化・Codexレビュー4条件付き承認の実装）
+// 正式ID一致(String比較)を最優先し、無ければ旧数値ID(legacy_id)で引く。
+// - 見つからない時は必ずnull（先頭要素等へのフォールバック禁止）
+// - Number()変換は使わない（UUIDでNaN化して静かに壊れるため）
+// 旧数値IDの記録がDB移行済みマスタ(uuid+legacy_id)を参照する橋渡しに使う。
+// =====================================================
+function masterById(list, id) {
+  if (id == null || id === '') return null
+  const s = String(id)
+  const byId = (list || []).find(x => x && String(x.id) === s)
+  if (byId) return byId
+  return (list || []).find(x => x && x.legacy_id != null && String(x.legacy_id) === s) || null
+}
+
 const INITIAL_PESTICIDES = []
 
 // =====================================================
@@ -1037,7 +1053,7 @@ function runFarmIntegrityChecks(ctx) {
   // （フォーム入力・localStorage・将来のDB移行でどちらの型も入りうるため）
   const sameId = (a, b) => a != null && b != null && String(a) === String(b)
   const fname  = (id) => { const f = fields.find(x => sameId(x.id, id)); return f ? f.name : (id != null && id !== '' ? ('圃場#' + id) : '圃場不明') }
-  const pById  = (id) => pesticides.find(p => sameId(p.id, id))
+  const pById  = (id) => masterById(pesticides, id) // 旧数値ID記録→UUID化済みマスタ(legacy_id)も引ける
   const days   = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000)
   const yearOf = (d) => (d || '').slice(0, 4)
   const rowset = (s) => (typeof parseRowRange === 'function' ? parseRowRange(s) : new Set())

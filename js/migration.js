@@ -96,7 +96,8 @@
       const id = mapId(idMaps.pesticides, p.id)
       const st = pestStock[String(p.id)] || {}
       put('farm_pesticides', [Object.assign(base(), {
-        id, name: S(p.name), reg_no: S(p.reg_no), dilution: N(p.dilution),
+        id, legacy_id: (typeof p.id === 'number' ? p.id : null),
+        name: S(p.name), reg_no: S(p.reg_no), dilution: N(p.dilution),
         max_times: Iv(p.max_times), preharvest_days: Iv(p.preharvest_days), target_crop: S(p.target_crop),
         stock_l: N(st.stock_l != null ? st.stock_l : (st.stock_kg != null ? st.stock_kg : p.stock_l)) || 0,
         alert_threshold_l: N(st.alert_threshold_l != null ? st.alert_threshold_l : st.alert_threshold_kg) || 0,

@@ -38,8 +38,9 @@ function makeMockSb() {
           api._upsertLog.push(rows.map(r => Object.assign({}, r))) // 何行送られたかの検証用(R15)
           const cols = (opts && opts.onConflict ? opts.onConflict : 'id').split(',').map(s => s.trim())
           const apply = () => rows.forEach(nr => {
-            const idx = tables[table].findIndex(er => cols.every(c => er[c] === nr[c]))
-            if (idx >= 0) tables[table][idx] = Object.assign({}, nr) // 既存を更新（消さない）
+            const idx = tables[table].findIndex(er => cols.every(c => String(er[c]) === String(nr[c])))
+            // 実PostgREST準拠: on conflict do update は「渡した列だけ」更新(渡さない列=在庫残高等は保持)
+            if (idx >= 0) tables[table][idx] = Object.assign({}, tables[table][idx], nr)
             else tables[table].push(Object.assign({}, nr))
           })
           // _upsertDelaysに値があると通信遅延を再現（連続write逆転のR17/R18用）
@@ -357,6 +358,22 @@ const KEY = 'farm_shipment_destinations_' + FARM
     global.sb._tables[SC].filter(r => r.farm_id === FARM).length === 0,
     JSON.stringify({ got: got30, after: r30b.value[0] }))
   farmRepo.unroute('farm_shipment_records')
+
+  // 32) 農薬マスタ(マスタUUID化第1弾): id保持upsert往復・legacy_id保持・在庫列に触れない
+  farmRepo.route('farm_pesticides', SR)
+  const PKEY = 'farm_pesticides_' + FARM
+  const PID = 'cccc3333-0000-0000-0000-000000000001'
+  // DB側に在庫残高がある状態を再現(在庫列はconverterが触れない=保持されるべき)
+  global.sb._tables['farm_pesticides'] = [{ id: PID, org_id: ORG, farm_id: FARM, name: 'ダントツ', reg_no: '21501', dilution: 1000, max_times: 3, preharvest_days: 7, target_crop: 'レタス', stock_l: 18, legacy_id: 3 }]
+  const r32 = await farmRepo.readAsync(PKEY)
+  const p32 = r32.value[0]
+  await farmRepo.write(PKEY, [Object.assign({}, p32, { dilution: 1500 })]) // 希釈倍率だけ変更
+  const rowP = global.sb._tables['farm_pesticides'].find(r => r.id === PID)
+  ok('R32 農薬マスタ: 往復でid/legacy_id保持・更新反映・DBの在庫列(stock_l)を上書きしない',
+    r32.ok && p32.id === PID && p32.legacy_id === 3 && p32.dilution === 1000 &&
+    rowP.dilution === 1500 && rowP.stock_l === 18 && rowP.legacy_id === 3,
+    JSON.stringify({ app: p32, db: { dilution: rowP.dilution, stock_l: rowP.stock_l } }))
+  farmRepo.unroute('farm_pesticides')
 
   const pass = checks.filter(c => c.pass).length
   const summary = { pass, total: checks.length, failed: checks.filter(c => !c.pass) }

@@ -1036,11 +1036,11 @@ const LANG_CONFIG = [
 // =====================================================
 function PesticideStockWidget({ pesticides, pesticideStock, onNavigate, _inGrid }) {
   const stockOf  = (p) => {
-    const s = (pesticideStock || []).find(s => s.pesticide_id === p.id)
+    const s = (pesticideStock || []).find(s => String(s.pesticide_id) === String(p.id))
     return ((s && s.stock_L != null) ? s.stock_L : p.stock_L) ?? 0
   }
   const threshOf = (p) => {
-    const s = (pesticideStock || []).find(s => s.pesticide_id === p.id)
+    const s = (pesticideStock || []).find(s => String(s.pesticide_id) === String(p.id))
     return ((s && s.alert_threshold_L != null) ? s.alert_threshold_L : p.alert_threshold_L) ?? 0
   }
 
@@ -1167,7 +1167,7 @@ function InventoryCheckPanel({ pesticides, pesticideStock, onUpdateStock }) {
   const [inputs, setInputs] = React.useState(() => {
     const obj = {}
     pesticides.forEach(p => {
-      const s = pesticideStock.find(s => s.pesticide_id === p.id)
+      const s = pesticideStock.find(s => String(s.pesticide_id) === String(p.id))
       obj[p.id] = String(s ? s.stock_L : 0)
     })
     return obj
@@ -1204,7 +1204,7 @@ function InventoryCheckPanel({ pesticides, pesticideStock, onUpdateStock }) {
     // 農薬ごとの入力行
     React.createElement('div', { style:{ display:'flex', flexDirection:'column', gap:'8px', marginBottom:'16px' } },
       ...pesticides.map(p => {
-        const s = pesticideStock.find(s => s.pesticide_id === p.id)
+        const s = pesticideStock.find(s => String(s.pesticide_id) === String(p.id))
         const thresh = s ? s.alert_threshold_L : 0
         const current = Number(inputs[p.id] ?? 0)
         const isAlertNow = current <= thresh
@@ -1364,7 +1364,7 @@ function PesticideHistoryPanel({ pesticides, records }) {
   const lastYM = lastDate.getFullYear() + '-' + String(lastDate.getMonth() + 1).padStart(2, '0')
 
   const sprayRecords = records
-    .filter(r => r.work_type === '農薬散布' && r.pesticide_id === selectedId)
+    .filter(r => r.work_type === '農薬散布' && String(r.pesticide_id) === String(selectedId))
     .sort((a, b) => b.date.localeCompare(a.date))
 
   const totalUsed   = sprayRecords.reduce((a, r) => a + (Number(r.amount) || 0), 0)
@@ -1380,7 +1380,7 @@ function PesticideHistoryPanel({ pesticides, records }) {
     React.createElement('div', { style:{ position:'relative', marginBottom:'20px' } },
       React.createElement('div', { style:{ display:'flex', gap:'8px', overflowX:'auto', paddingBottom:'4px' } },
         ...pesticides.map(p => {
-          const isActiveChip = selectedId === p.id
+          const isActiveChip = String(selectedId) === String(p.id)
           return React.createElement('button', {
             key: p.id,
             onClick: () => setSelectedId(p.id),
@@ -1490,11 +1490,11 @@ function PesticideHistoryPanel({ pesticides, records }) {
 // =====================================================
 function PesticideStockWidget({ pesticides, pesticideStock, onNavigate }) {
   const stockOf  = (p) => {
-    const s = pesticideStock.find(s => s.pesticide_id === p.id)
+    const s = pesticideStock.find(s => String(s.pesticide_id) === String(p.id))
     return ((s && s.stock_L != null) ? s.stock_L : p.stock_L) ?? 0
   }
   const threshOf = (p) => {
-    const s = pesticideStock.find(s => s.pesticide_id === p.id)
+    const s = pesticideStock.find(s => String(s.pesticide_id) === String(p.id))
     return ((s && s.alert_threshold_L != null) ? s.alert_threshold_L : p.alert_threshold_L) ?? 0
   }
 
@@ -2794,7 +2794,7 @@ function PesticideInput({ pesticides, records, fieldId, pesticideId, crop, field
   // 【フェーズ2】作物に応じた使用可能農薬リスト（CROP_PESTICIDE_MAP）
   const cropMap = crop ? CROP_PESTICIDE_MAP[crop] : null
   const availablePesticides = cropMap
-    ? pesticides.filter(p => cropMap.some(c => c.pesticide_id === p.id))
+    ? pesticides.filter(p => cropMap.some(c => String(c.pesticide_id) === String(p.id) || (p.legacy_id != null && String(c.pesticide_id) === String(p.legacy_id))))
     : pesticides
   // 作物に紐づく農薬が1種類だけなら自動セット（手入力不要）
   const autoSelectId = cropMap && availablePesticides.length === 1 ? availablePesticides[0].id : null
@@ -2803,9 +2803,9 @@ function PesticideInput({ pesticides, records, fieldId, pesticideId, crop, field
   // 【新規】散布液量（L/10a）をスライダーで管理
   const [sprayLiquidPerTenare, setSprayLiquidPerTenare] = React.useState(500)
 
-  const selected   = pesticides.find(p => p.id === selectedId)
+  const selected   = masterById(pesticides, selectedId)
   // 作物マップに登録された標準希釈倍率（自動セット）。なければ農薬自体の標準倍率を使用
-  const mapEntry   = cropMap && selected ? cropMap.find(c => c.pesticide_id === selected.id) : null
+  const mapEntry   = cropMap && selected ? cropMap.find(c => String(c.pesticide_id) === String(selected.id) || (selected.legacy_id != null && String(c.pesticide_id) === String(selected.legacy_id))) : null
   const dilution   = mapEntry ? mapEntry.dilution : (selected ? selected.dilution : 1000)
   // 使用回数は日報の農薬散布 + 農薬散布タブ（ロット単位）の記録を合算した参考値
   const usedTimes  = countPesticideUse(records, fieldId, selectedId, lotSprayRecords || [])
@@ -2851,8 +2851,8 @@ function PesticideInput({ pesticides, records, fieldId, pesticideId, crop, field
         ...availablePesticides.map(p => {
           const used = countPesticideUse(records, fieldId, p.id)
           const over = used >= p.max_times
-          const sel  = selectedId === p.id
-          const pDilution = cropMap ? (cropMap.find(c => c.pesticide_id === p.id) || {}).dilution || p.dilution : p.dilution
+          const sel  = String(selectedId) === String(p.id)
+          const pDilution = cropMap ? (cropMap.find(c => String(c.pesticide_id) === String(p.id) || (p.legacy_id != null && String(c.pesticide_id) === String(p.legacy_id))) || {}).dilution || p.dilution : p.dilution
           return React.createElement('button', {
             key: p.id,
             onClick: () => { if (!over) setSelectedId(p.id) },
@@ -3844,7 +3844,7 @@ function RecordDetailModal({ record, fields, pesticides, onClose, onUpdate, onDe
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false)
   const [form, setForm] = React.useState({ ...record })
   const f = fields.find(x => x.id === record.field_id)
-  const p = pesticides ? pesticides.find(x => x.id === record.pesticide_id) : null
+  const p = masterById(pesticides, record.pesticide_id)
   const cfg = WORK_ICON_MAP[record.work_type] || WORK_ICON_MAP['その他']
   const uf = (k, v) => setForm(prev => ({ ...prev, [k]: v }))
 
@@ -4728,7 +4728,7 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
   }
   const discardDraft = () => { clearDraft(); setRestorableDraft(null); setDraftSaved(false) }
 
-  const selP    = pesticides.find(p => p.id === Number(form.pesticide_id))
+  const selP    = masterById(pesticides, form.pesticide_id)
   const isOver  = isPesticideOverLimit(records, form.field_id, selP, lotSprayRecords || [])
   const selField = fields.find(f => f.id === Number(form.field_id))
 
@@ -5022,7 +5022,7 @@ function RowDetailPanel({ field, row, records, pesticides, onClose }) {
         ? React.createElement('div', { style:{ fontSize:'12px', color:'#94A3B8', marginBottom:'4px' } }, '農薬使用の記録はまだありません')
         : React.createElement('div', { style:{ display:'flex', flexDirection:'column', gap:'6px' } },
             ...pesticideRecords.slice(-3).reverse().map(r => {
-              const p = pesticides.find(x => x.id === r.pesticide_id)
+              const p = masterById(pesticides, r.pesticide_id)
               return React.createElement('div', { key:r.id, style:{ fontSize:'12px', color:'#374151', display:'flex', justifyContent:'space-between', borderBottom:'1px solid #F1F5F9', padding:'4px 0' } },
                 React.createElement('span', null, r.date),
                 React.createElement('span', null, (p ? p.name : '—') + (r.dilution ? '（'+r.dilution+'倍）' : ''))
@@ -6175,10 +6175,10 @@ function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff, 
   // 希釈倍率の初期値: ①農薬マスタの標準希釈 → ②作物別の推奨希釈 → ③空。
   // undefinedは入れない（controlled→uncontrolled 警告防止のため必ず ''）。
   const recDilution = (pid) => {
-    const p = pesticides.find(x => x.id === Number(pid))
+    const p = masterById(pesticides, pid)
     if (p && p.dilution != null && p.dilution !== '') return p.dilution
     const list = (typeof RECOMMENDED_DILUTIONS !== 'undefined' && field) ? RECOMMENDED_DILUTIONS[field.crop] : null
-    const hit  = list && list.find(r => r.pesticide_id === Number(pid))
+    const hit  = list && list.find(r => String(r.pesticide_id) === String(pid))
     return (hit && hit.dilution != null) ? hit.dilution : ''
   }
   const updateItem = (idx, patch) => setItems(prev => prev.map((it, i) => i === idx ? { ...it, ...patch } : it))
@@ -6445,7 +6445,7 @@ function LotSprayRecordList({ records, pesticides, onDelete, field, staff }) {
           ),
           React.createElement('div', { style:{ display:'flex', flexWrap:'wrap', gap:'6px', marginBottom:'6px' } },
             ...(r.pesticides || []).map((p, i) => {
-              const pest = pesticides.find(x => x.id === p.pesticide_id)
+              const pest = masterById(pesticides, p.pesticide_id)
               const disposal = Number(p.disposal_amount) || 0
               return React.createElement('span', {
                 key:i,
@@ -6529,7 +6529,7 @@ function LotSprayRecordList({ records, pesticides, onDelete, field, staff }) {
             React.createElement('span', { style:{ color:'#6B7280', flexShrink:0 } }, '使用農薬'),
             React.createElement('div', { style:{ display:'flex', flexDirection:'column', gap:'4px', alignItems:'flex-end' } },
               ...(selectedRecord.pesticides || []).map((p, i) => {
-                const pest = pesticides.find(x => x.id === p.pesticide_id)
+                const pest = masterById(pesticides, p.pesticide_id)
                 const disposal = Number(p.disposal_amount) || 0
                 return React.createElement('div', { key:i, style:{ fontWeight:600, color:'#B45309', textAlign:'right' } },
                   (pest ? pest.name : '不明な農薬') + '（' + p.dilution + '倍）',
@@ -9154,7 +9154,7 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
   }
 
   // マスタ名の逆引き
-  const pestName = (id) => (pesticides || []).find(p => p.id === Number(id))?.name || '農薬'
+  const pestName = (id) => (masterById(pesticides, id) || {}).name || '農薬'
   const fertName = (id) => (fertilizers || []).find(p => p.id === Number(id))?.name || '肥料'
 
   // ── 資材原価の単価ソース（既存「圃場実績・評価」原価タブと同一の単価定義で揃える） ──
@@ -11247,7 +11247,7 @@ function GapExport({ gap, records, fields, pesticides, ctx }) {
             React.createElement('tbody',null,
               ...records.filter(r=>r.work_type==='農薬散布').slice(0,3).map((r,i)=>{
                 const field=fields.find(f=>f.id===r.field_id)
-                const pest=pesticides.find(p=>p.id===r.pesticide_id)
+                const pest=masterById(pesticides, r.pesticide_id)
                 return React.createElement('tr',{key:r.id,style:{background:i%2===1?'#f4faf8':'#fff'}},
                   ...[i+1,r.date,field?field.name:'—',field?field.crop:'—',pest?pest.name:'—',pest?pest.reg_no:'—',r.dilution?r.dilution+'倍':'—',r.amount||'—',r.weather||'—',r.worker||'—',pest?pest.preharvest_days+'日':'—'].map((v,j)=>
                     React.createElement('td',{key:j,style:{padding:'4px 6px',border:'1px solid #ccc',textAlign:'center'}},v)
@@ -13879,7 +13879,7 @@ function CropPlan({ fields, plans, records, pesticides, onAdd, onDelete }) {
       records
         .filter(r => r.field_id === plan.field_id && r.work_type === '農薬散布' && r.pesticide_id)
         .forEach(r => {
-          const pest = pesticides.find(p => p.id === r.pesticide_id)
+          const pest = masterById(pesticides, r.pesticide_id)
           if (!pest) return
           const harvestDate = new Date(CONFIG.CURRENT_YEAR, plan.end_month, 1) // 収穫月の1日
           const sprayDate   = new Date(r.date)
@@ -14500,7 +14500,7 @@ function PesticideMasterPage({ pesticides, pesticideStock, pesticidePurchases, o
   const pf = (k, v) => setForm(prev => ({ ...prev, [k]: v }))
 
   const startEdit = (p) => {
-    const stockEntry = pesticideStock.find(s => s.pesticide_id === p.id)
+    const stockEntry = pesticideStock.find(s => String(s.pesticide_id) === String(p.id))
     setForm({
       name:               p.name,
       reg_no:             p.reg_no,
@@ -14543,7 +14543,7 @@ function PesticideMasterPage({ pesticides, pesticideStock, pesticidePurchases, o
 
   // 在庫率（%）
   const stockRatio = (p) => {
-    const s = pesticideStock.find(s => s.pesticide_id === p.id)
+    const s = pesticideStock.find(s => String(s.pesticide_id) === String(p.id))
     if (!s || s.stock_L === 0) return 0
     const purchases = pesticidePurchases.filter(pu => pu.pesticide_id === p.id)
     const totalBought = purchases.reduce((a, b) => a + (b.amount_L || 0), 0)
@@ -14552,13 +14552,13 @@ function PesticideMasterPage({ pesticides, pesticideStock, pesticidePurchases, o
   }
 
   const stockOf = (p) => {
-    const s = pesticideStock.find(s => s.pesticide_id === p.id)
+    const s = pesticideStock.find(s => String(s.pesticide_id) === String(p.id))
     const v = (s && s.stock_L != null) ? s.stock_L : p.stock_L
     return v ?? 0
   }
 
   const threshOf = (p) => {
-    const s = pesticideStock.find(s => s.pesticide_id === p.id)
+    const s = pesticideStock.find(s => String(s.pesticide_id) === String(p.id))
     const v = (s && s.alert_threshold_L != null) ? s.alert_threshold_L : p.alert_threshold_L
     return v ?? 0
   }
@@ -14853,7 +14853,7 @@ function PesticideMasterPage({ pesticides, pesticideStock, pesticidePurchases, o
     // detailModalId を元に pesticides から最新オブジェクトを取得することで
     // 編集・保存後も常に最新データをモーダルに反映する
     (() => {
-      const detailPesticide = detailModalId !== null ? pesticides.find(p => p.id === detailModalId) : null
+      const detailPesticide = masterById(pesticides, detailModalId)
       return detailPesticide ? React.createElement(PesticideDetailModal, {
         pesticide:    detailPesticide,
         stock:        stockOf(detailPesticide),
