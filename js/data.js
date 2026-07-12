@@ -417,6 +417,17 @@ function masterById(list, id) {
   if (byId) return byId
   return (list || []).find(x => x && x.legacy_id != null && String(x.legacy_id) === s) || null
 }
+// マスタ行と参照ID(旧数値/新UUID)の一致判定。仕入履歴など「マスタ側から参照を探す」向き
+function refMatchesMaster(master, refId) {
+  if (!master || refId == null || refId === '') return false
+  const s = String(refId)
+  return String(master.id) === s || (master.legacy_id != null && String(master.legacy_id) === s)
+}
+// 参照IDをマスタの正式IDへ正規化(集計キーの統一用)。マスタに無ければ元の値を文字列化して返す
+function canonicalMasterId(list, id) {
+  const m = masterById(list, id)
+  return m ? String(m.id) : String(id)
+}
 
 const INITIAL_PESTICIDES = []
 

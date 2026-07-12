@@ -4773,7 +4773,7 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
         field_id: fid,
         // 写真は容量肥大を避けるため、複数展開時は主圃場(先頭)の記録のみに添付
         photos: i === 0 ? (form.photos || []) : [],
-        pesticide_id: form.pesticide_id ? Number(form.pesticide_id) : null,
+        pesticide_id: form.pesticide_id ? String(form.pesticide_id) : null, // UUID対応: Number()はNaN化するため禁止
       })
     })
     celebrateSave(targetIds.length > 1 ? targetIds.length + '圃場に記録！' : '記録しました！')
@@ -6127,7 +6127,7 @@ function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff, 
   // 【P6 次回防除リマインド】この圃場で各農薬を前回撒いた日→経過日数を出し、撒き過ぎ/間隔の判断を助ける。
   const lastSprayFor = (pid) => {
     if (!pid) return null
-    const hits = (pastSprays || []).filter(r => r.field_id === field.id && (r.pesticides || []).some(p => Number(p.pesticide_id) === Number(pid)) && r.date)
+    const hits = (pastSprays || []).filter(r => r.field_id === field.id && (r.pesticides || []).some(p => String(p.pesticide_id) === String(pid)) && r.date)
     if (!hits.length) return null
     hits.sort((a, b) => String(b.date).localeCompare(String(a.date)))
     const last = hits[0].date
@@ -6186,7 +6186,7 @@ function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff, 
   const removeItem = (idx) => setItems(prev => prev.filter((_, i) => i !== idx))
 
   const handlePesticideChange = (idx, id) => {
-    updateItem(idx, { pesticide_id: Number(id), dilution: recDilution(id) })
+    updateItem(idx, { pesticide_id: id ? String(id) : '', dilution: recDilution(id) }) // UUID対応
   }
 
   // rowRange（テキスト）が最終的な保存値。マップ選択→自動変換 or 手動入力どちらでも同じstateに入る。
@@ -6205,7 +6205,7 @@ function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff, 
       weather,
       row_range: rowRange.trim(),
       pesticides: items.map(it => ({
-        pesticide_id: Number(it.pesticide_id),
+        pesticide_id: String(it.pesticide_id), // UUID対応: Number()はNaN化するため禁止
         dilution: Number(it.dilution),
         disposal_amount: Number(it.disposal_amount) || 0,
       })),
@@ -6729,7 +6729,7 @@ function TopDressingRecordForm({ field, fertilizers, lots, onSave, onCancel, sta
       row_range: rowRange.trim(),
       row_count: rowCount,
       fertilizers: items.map(it => ({
-        fertilizer_id: Number(it.fertilizer_id),
+        fertilizer_id: String(it.fertilizer_id), // UUID対応: Number()はNaN化するため禁止
         dilution: Number(it.dilution) || null,
         amount_kg: Number(it.amount_kg) || null,
       })),
@@ -9161,11 +9161,12 @@ function FieldSummaryPage({ fields, farmLots, lotSprayRecords, topDressingRecord
   // 農薬: マスタに単価が無いため pesticidePurchases の購入実績から平均単価(円/L)を算出
   const pestAvg = {}
   ;(pesticidePurchases || []).forEach(pu => {
-    if (!pestAvg[pu.pesticide_id]) pestAvg[pu.pesticide_id] = { amount:0, price:0 }
-    pestAvg[pu.pesticide_id].amount += Number(pu.amount_L) || 0
-    pestAvg[pu.pesticide_id].price  += Number(pu.price_yen) || 0
+    const k = canonicalMasterId(pesticides, pu.pesticide_id) // 旧数値ID仕入もUUIDマスタに集約
+    if (!pestAvg[k]) pestAvg[k] = { amount:0, price:0 }
+    pestAvg[k].amount += Number(pu.amount_L) || 0
+    pestAvg[k].price  += Number(pu.price_yen) || 0
   })
-  const priceOfPesticide  = (id) => { const a = pestAvg[id]; return (a && a.amount > 0) ? a.price / a.amount : null }
+  const priceOfPesticide  = (id) => { const a = pestAvg[canonicalMasterId(pesticides, id)]; return (a && a.amount > 0) ? a.price / a.amount : null }
   // 肥料: マスタの unit_price_yen_per_kg（null=価格未確定）
   const priceOfFertilizer = (id) => { const f = masterById(fertilizers, id); return (f && f.unit_price_yen_per_kg != null) ? f.unit_price_yen_per_kg : null }
 
@@ -9909,12 +9910,13 @@ function FieldPerformancePage({ fields, harvestRecords, fieldPerformance, perfor
   // 農薬: 単価が無いためpesticidePurchasesから平均単価(円/L)を算出する
   const pesticideAvgPrice = {}
   ;(pesticidePurchases || []).forEach(pu => {
-    if (!pesticideAvgPrice[pu.pesticide_id]) pesticideAvgPrice[pu.pesticide_id] = { amount:0, price:0 }
-    pesticideAvgPrice[pu.pesticide_id].amount += Number(pu.amount_L) || 0
-    pesticideAvgPrice[pu.pesticide_id].price  += Number(pu.price_yen) || 0
+    const k = canonicalMasterId(pesticides, pu.pesticide_id) // 旧数値ID仕入もUUIDマスタに集約
+    if (!pesticideAvgPrice[k]) pesticideAvgPrice[k] = { amount:0, price:0 }
+    pesticideAvgPrice[k].amount += Number(pu.amount_L) || 0
+    pesticideAvgPrice[k].price  += Number(pu.price_yen) || 0
   })
   const priceOfPesticide = (id) => {
-    const a = pesticideAvgPrice[id]
+    const a = pesticideAvgPrice[canonicalMasterId(pesticides, id)]
     return (a && a.amount > 0) ? a.price / a.amount : null
   }
   // 肥料: マスタの unit_price_yen_per_kg をそのまま使用（null=価格未確定）
@@ -14545,7 +14547,7 @@ function PesticideMasterPage({ pesticides, pesticideStock, pesticidePurchases, o
   const stockRatio = (p) => {
     const s = pesticideStock.find(s => String(s.pesticide_id) === String(p.id))
     if (!s || s.stock_L === 0) return 0
-    const purchases = pesticidePurchases.filter(pu => pu.pesticide_id === p.id)
+    const purchases = pesticidePurchases.filter(pu => refMatchesMaster(p, pu.pesticide_id)) // 旧数値ID仕入も表示
     const totalBought = purchases.reduce((a, b) => a + (b.amount_L || 0), 0)
     if (!totalBought) return 100
     return Math.min(100, Math.round((s.stock_L / totalBought) * 100))
@@ -14860,7 +14862,7 @@ function PesticideMasterPage({ pesticides, pesticideStock, pesticidePurchases, o
         thresh:       threshOf(detailPesticide),
         ratio:        stockRatio(detailPesticide),
         isAlert:      isAlert(detailPesticide),
-        purchases:    pesticidePurchases.filter(pu => pu.pesticide_id === detailPesticide.id),
+        purchases:    pesticidePurchases.filter(pu => refMatchesMaster(detailPesticide, pu.pesticide_id)),
         onAddPurchase: onAddPurchase,
         onClose:      () => setDetailModalId(null),
         onEdit:       (p) => { setDetailModalId(null); startEdit(p) },
@@ -14914,7 +14916,7 @@ function PesticideDetailModal({ pesticide: p, stock, thresh, ratio, isAlert: ale
 
   // 購入履歴（この農薬のみ・新しい順）
   const myPurchases = (purchases || [])
-    .filter(pu => pu.pesticide_id === p.id)
+    .filter(pu => refMatchesMaster(p, pu.pesticide_id))
     .sort((a,b) => b.date.localeCompare(a.date))
 
   return React.createElement('div', {
@@ -15532,7 +15534,7 @@ function FertilizerAddModal({ C, fertilizers, onClose, onSave }) {
   const [isBlend, setIsBlend] = React.useState(false)
   const [blendRows, setBlendRows] = React.useState([{ fertilizer_id:'', bags:'' }, { fertilizer_id:'', bags:'' }])
   const blendComponents = blendRows
-    .map(r => ({ fertilizer_id: Number(r.fertilizer_id), bags: Number(r.bags) }))
+    .map(r => ({ fertilizer_id: r.fertilizer_id ? String(r.fertilizer_id) : '', bags: Number(r.bags) })) // UUID対応
     .filter(r => r.fertilizer_id && r.bags > 0)
   const blendCalc = (() => {
     if (!isBlend || blendComponents.length === 0) return null
