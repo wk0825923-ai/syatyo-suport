@@ -14,17 +14,24 @@ function makeMockSb() {
     from(table) {
       tables[table] = tables[table] || []
       const q = {
-        _table: table, _op: 'select', _filter: null, _notIn: null, _limit: null,
-        select() { this._op = 'select'; return this },
+        _table: table, _op: 'select', _filters: [], _in: null, _notIn: null, _limit: null, _patch: null, _returning: false,
+        // update/delete後の.select()は「変更行を返す」指定(実API準拠)。それ以外は読み取り
+        select() { if (this._op === 'update' || this._op === 'delete') this._returning = true; else this._op = 'select'; return this },
+        update(patch) { this._op = 'update'; this._patch = patch; return this },
         delete() { this._op = 'delete'; return this },
-        eq(col, val) { this._filter = { col, val }; return this },
+        eq(col, val) { this._filters.push({ col, val }); return this },
         in(col, vals) { this._in = { col, vals: vals.map(String) }; return this },
         not(col, op, listStr) {
           const vals = String(listStr).replace(/^\(|\)$/g, '').split(',').map(s => s.replace(/^"|"$/g, ''))
           this._notIn = { col, vals }; return this
         },
         limit(n) { this._limit = n; return this },
-        insert(rows) { tables[table].push(...rows.map(r => Object.assign({}, r))); return Promise.resolve({ error: null }) },
+        insert(rows) {
+          // PK重複は23505(実DBのunique violation)を再現 → 冪等createの検証用
+          const dup = rows.some(nr => nr.id != null && tables[table].some(er => String(er.id) === String(nr.id)))
+          if (dup) return Promise.resolve({ error: { code: '23505', message: 'duplicate key value' } })
+          tables[table].push(...rows.map(r => Object.assign({}, r))); return Promise.resolve({ error: null })
+        },
         upsert(rows, opts) {
           api._upsertLog.push(rows.map(r => Object.assign({}, r))) // 何行送られたかの検証用(R15)
           const cols = (opts && opts.onConflict ? opts.onConflict : 'id').split(',').map(s => s.trim())
@@ -39,21 +46,25 @@ function makeMockSb() {
           return new Promise(res => setTimeout(() => { apply(); res({ error: null }) }, d))
         },
         then(resolve) {
+          const match = (r) => this._filters.every(f => String(r[f.col]) === String(f.val))
           if (this._op === 'delete') {
-            let keep = tables[table]
-            if (this._filter) {
-              keep = keep.filter(r => {
-                if (r[this._filter.col] !== this._filter.val) return true // 別farmは残す
-                if (this._in) return this._in.vals.indexOf(String(r[this._in.col])) < 0 // in指定: リスト内keyだけ消す
-                if (this._notIn) return this._notIn.vals.indexOf(r[this._notIn.col]) >= 0 // リスト内keyは残す
-                return false // farm一致・追加条件なし＝消す
-              })
-            } else keep = []
-            tables[table] = keep
-            resolve({ data: null, error: null })
+            const removed = []
+            tables[table] = tables[table].filter(r => {
+              if (this._filters.length && !match(r)) return true // 条件外は残す
+              if (this._in && this._in.vals.indexOf(String(r[this._in.col])) < 0) return true // in指定: リスト内だけ消す
+              if (this._notIn && this._notIn.vals.indexOf(r[this._notIn.col]) >= 0) return true // リスト内keyは残す
+              removed.push(Object.assign({}, r)); return false
+            })
+            resolve({ data: this._returning ? removed : null, error: null })
+          } else if (this._op === 'update') {
+            const hit = []
+            tables[table] = tables[table].map(r => {
+              if (!match(r)) return r
+              const nr = Object.assign({}, r, this._patch); hit.push(Object.assign({}, nr)); return nr
+            })
+            resolve({ data: this._returning ? hit : null, error: null })
           } else {
-            let rows = tables[table]
-            if (this._filter) rows = rows.filter(r => r[this._filter.col] === this._filter.val)
+            let rows = tables[table].filter(r => match(r))
             if (this._limit != null) rows = rows.slice(0, this._limit)
             resolve({ data: rows.map(r => Object.assign({}, r)), error: null })
           }
@@ -273,6 +284,53 @@ const KEY = 'farm_shipment_destinations_' + FARM
   const rowsT2 = global.sb._tables['farm_monthly_temps'].filter(r => r.farm_id === FARM)
   ok('R22 monthly_temps: 空writeでsingleton行が消える(他farmは無傷)', rowsT2.length === 0)
   farmRepo.unroute('farm_monthly_temps')
+
+  // ── 記録系CRUD(整備記録パイロット・設計書: create/update/remove＋version楽観ロック＋冪等) ──
+  farmRepo.route('farm_maintenance_records', SR)
+  const MC = 'farm_maintenance_records'
+  const MREC = { id: 'aaaa1111-0000-0000-0000-000000000001', date: '2026-07-12', machine_name: 'トラクター', machine_no: 'T-01', mtype: '点検', result: '異常なし', worker: '今福', note: '' }
+
+  // 23) create: 1行insert・org/farm/version付与・fromRowで返る
+  const c23 = await farmRepo.create(MC, FARM, MREC)
+  const mRows = () => global.sb._tables[MC].filter(r => r.farm_id === FARM)
+  ok('R23 create: 1行追加(org/farm/version=1付与)',
+    c23.ok && c23.record && c23.record.version === 1 && mRows().length === 1 && mRows()[0].org_id === ORG,
+    JSON.stringify({ ok: c23.ok, n: mRows().length }))
+
+  // 24) createの冪等性: 同じidの再送(通信リトライ)は二重登録せず成功扱い
+  const c24 = await farmRepo.create(MC, FARM, MREC)
+  ok('R24 create再送は冪等(duplicate=ok・行は増えない)', c24.ok && c24.duplicate === true && mRows().length === 1,
+    JSON.stringify({ ok: c24.ok, dup: c24.duplicate, n: mRows().length }))
+
+  // 25) update: versionが合えば更新されversionが上がる
+  const u25 = await farmRepo.update(MC, FARM, MREC.id, { note: 'オイル交換' }, 1)
+  ok('R25 update: version一致で更新・version+1', u25.ok && mRows()[0].note === 'オイル交換' && mRows()[0].version === 2,
+    JSON.stringify({ ok: u25.ok, v: mRows()[0].version }))
+
+  // 26) update: 古いversion(既に他端末が更新)はconflictで拒否・値は変わらない
+  const u26 = await farmRepo.update(MC, FARM, MREC.id, { note: '古い編集' }, 1)
+  ok('R26 update: version不一致はconflict(無言の上書きなし)', !u26.ok && u26.conflict === true && mRows()[0].note === 'オイル交換',
+    JSON.stringify({ ok: u26.ok, conflict: u26.conflict }))
+
+  // 27) remove: version不一致はconflict / 一致で削除 / 再送は冪等ok
+  const d27a = await farmRepo.remove(MC, FARM, MREC.id, 1)
+  const d27b = await farmRepo.remove(MC, FARM, MREC.id, 2)
+  const d27c = await farmRepo.remove(MC, FARM, MREC.id, 2)
+  ok('R27 remove: 版ズレconflict→一致で削除→再送は冪等ok',
+    !d27a.ok && d27a.conflict === true && d27b.ok && mRows().length === 0 && d27c.ok && d27c.alreadyGone === true,
+    JSON.stringify({ a: d27a.conflict, b: d27b.ok, c: d27c.alreadyGone, n: mRows().length }))
+
+  // 28) 越境ガード: 許可外farmへのcreateは拒否
+  farmRepo.setContext({ farmIds: ['99999999-9999-9999-9999-999999999999'] })
+  const c28 = await farmRepo.create(MC, FARM, Object.assign({}, MREC, { id: 'aaaa1111-0000-0000-0000-000000000002' }))
+  farmRepo.setContext({ farmIds: null })
+  ok('R28 create: 許可外farmは拒否(越境防止)', !c28.ok && mRows().length === 0)
+
+  // 29) 記録系への全置換write()は禁止(削除意図の誤推測で他端末の記録を消さない)
+  const w29 = await farmRepo.write(MC + '_' + FARM, [])
+  ok('R29 記録系への全置換writeは拒否される', w29.ok === false && String(w29.error && w29.error.message).indexOf('create/update/remove') >= 0,
+    String(w29.error && w29.error.message))
+  farmRepo.unroute('farm_maintenance_records')
 
   const pass = checks.filter(c => c.pass).length
   const summary = { pass, total: checks.length, failed: checks.filter(c => !c.pass) }

@@ -231,10 +231,11 @@
     })
     counts['farm_shipment_records'] = arrOf(get('farm_shipment_records')).length
 
-    // 機械整備
+    // 機械整備（記録系CRUD: 旧数値IDはlegacy_idへ保持・versionは楽観ロック初期値1）
     arrOf(get('farm_maintenance_records')).forEach(r => {
       put('farm_maintenance_records', [Object.assign(base(), {
-        id: uuid(), date: D(r.date), machine_name: S(r.machine_name || r.machine),
+        id: uuid(), legacy_id: (typeof r.id === 'number' ? r.id : null), version: 1,
+        date: D(r.date), machine_name: S(r.machine_name || r.machine),
         machine_no: S(r.machine_no), mtype: S(r.mtype || r.kind), result: S(r.result),
         worker: S(r.worker), note: S(r.note),
       })])

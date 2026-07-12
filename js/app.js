@@ -167,10 +167,12 @@
   // ── 収穫予測: 月別平均気温（平年値・1回設定で永続化） ──
   const [monthlyTemps, setMonthlyTemps] = useFPS('farm_monthly_temps', INITIAL_MONTHLY_TEMPS)
   // ── 機械整備記録（GAP機械管理）・出荷記録（収穫→ストック→出荷）: いずれも純追加の専用キー ──
-  const [maintenanceRecords, setMaintenanceRecords] = useFPS('farm_maintenance_records', [])
+  // 【記録系CRUDパイロット】整備記録は1行単位CRUD(useRecordCollection)。祝福は保存成功後だけ。
+  const maintenance = useRecordCollection('farm_maintenance_records', farmKey, [])
+  const maintenanceRecords = maintenance.list
   const [shipmentRecords, setShipmentRecords] = useFPS('farm_shipment_records', [])
-  const onAddMaintenance    = (r)  => { setMaintenanceRecords(p => [...p, r]); celebrateSave('整備を記録！') }
-  const onDeleteMaintenance = (id) => setMaintenanceRecords(p => p.filter(x => x.id !== id))
+  const onAddMaintenance    = async (r) => { const res = await maintenance.add(r); if (res && res.ok) celebrateSave('整備を記録！') }
+  const onDeleteMaintenance = (id) => { maintenance.removeById(id) }
   const onAddShipment       = (r)  => { setShipmentRecords(p => [...p, r]); celebrateSave('出荷を記録！') }
   const onDeleteShipment    = (id) => setShipmentRecords(p => p.filter(x => x.id !== id))
   // モジュールレベル参照を同期 — グローバル関数 getCropCategory / getHarvestGrades が最新を参照できる

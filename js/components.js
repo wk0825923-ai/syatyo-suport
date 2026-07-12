@@ -16548,7 +16548,8 @@ function MaintenanceLogPage({ records, staff, onSave, onDelete }) {
   const valid = form.machine_name.trim() !== ''
   const submit = () => {
     if (!valid) { showToast('機械名を入力してください', 'warn'); return }
-    onSave({ ...form, id: Date.now(), machine_name: form.machine_name.trim(), machine_no: form.machine_no.trim(), worker: form.worker.trim(), note: form.note.trim() })
+    // idは付けない: useRecordCollection側がUUIDを発行する(Date.now()は複数端末で衝突し得るため廃止)
+    onSave({ ...form, machine_name: form.machine_name.trim(), machine_no: form.machine_no.trim(), worker: form.worker.trim(), note: form.note.trim() })
     setForm(blank)
   }
   const rows = [...(records || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)))
@@ -16836,5 +16837,91 @@ function usePersistState(key, initial) {
     return unsubscribe
   }, [key])
   return [state, setPersist]
+}
+
+// 【記録系専用】1行単位CRUDのコレクションフック（設計書: 中川農園_記録系CRUD移行設計.html）
+// usePersistStateとの違い: 保存は配列まるごとではなく create/remove/update の「意図」を1行ずつ明示。
+// 楽観的更新＋失敗時ロールバック。祝福表示は呼び出し側が add の結果を await してから行うこと。
+// リアルタイムはINSERT/UPDATE/DELETEをID単位で適用（全件再読込しない＝編集中UIを壊さない）。
+function useRecordCollection(collection, farmId, initial) {
+  const key = collection + '_' + farmId
+  const [list, setList] = React.useState(() => {
+    const r = farmRepo.readSync(key)
+    return (r.ok && r.found && Array.isArray(r.value)) ? r.value : (initial || [])
+  })
+  const listRef = React.useRef(list)
+  React.useEffect(() => { listRef.current = list }, [list])
+  const loadedRef = React.useRef(!(farmRepo.isAsync && farmRepo.isAsync(key)))
+  React.useEffect(() => {
+    let alive = true
+    loadedRef.current = !(farmRepo.isAsync && farmRepo.isAsync(key))
+    Promise.resolve(farmRepo.readAsync ? farmRepo.readAsync(key) : null).then(r => {
+      if (!alive || !r || !r.ok) return
+      loadedRef.current = true
+      if (r.found && Array.isArray(r.value)) setList(r.value)
+    }).catch(() => {})
+    const unsub = farmRepo.subscribeRows ? farmRepo.subscribeRows(collection, farmId, (evt) => {
+      loadedRef.current = true
+      setList(prev => {
+        if (evt.type === 'replace') return Array.isArray(evt.list) ? evt.list : prev
+        if (evt.type === 'DELETE') return prev.filter(x => String(x.id) !== String(evt.id))
+        if (evt.type === 'INSERT') return prev.some(x => String(x.id) === String(evt.record.id)) ? prev : prev.concat([evt.record])
+        if (evt.type === 'UPDATE') return prev.map(x => String(x.id) === String(evt.record.id) ? evt.record : x)
+        return prev
+      })
+    }) : function () {}
+    return () => { alive = false; unsub() }
+  }, [key])
+  const reload = React.useCallback(async () => {
+    const r = await Promise.resolve(farmRepo.readAsync(key)).catch(() => null)
+    if (r && r.ok && r.found && Array.isArray(r.value)) setList(r.value)
+  }, [key])
+  const notLoaded = () => { try { showToast('データを読み込み中です。少し待ってからもう一度お試しください。', 'error') } catch (_) {} ; return { ok: false } }
+  const conflictRecover = () => { try { showToast('別の端末で更新されています。最新の状態を読み込みました。', 'warn') } catch (_) {} ; reload() }
+  const add = React.useCallback(async (record) => {
+    if (!loadedRef.current) return notLoaded()
+    const rec = Object.assign({}, record)
+    if (rec.id == null) rec.id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(36).slice(2, 8)
+    setList(prev => prev.concat([rec])) // 楽観的更新: 画面は即反映
+    const res = await Promise.resolve(farmRepo.create(collection, farmId, rec)).catch(e => ({ ok: false, error: e }))
+    if (!res || !res.ok) {
+      setList(prev => prev.filter(x => String(x.id) !== String(rec.id))) // ロールバック
+      console.warn('[useRecordCollection] 追加失敗:', collection, res && res.error)
+      try { showToast('保存に失敗しました。通信状態を確認してもう一度お試しください。', 'error') } catch (_) {}
+    }
+    return res || { ok: false }
+  }, [collection, farmId])
+  const updateById = React.useCallback(async (id, patch) => {
+    if (!loadedRef.current) return notLoaded()
+    const cur = listRef.current.find(x => String(x.id) === String(id))
+    if (!cur) return { ok: false }
+    const expected = cur.version || 1
+    setList(prev => prev.map(x => String(x.id) === String(id) ? Object.assign({}, x, patch, { version: expected + 1 }) : x))
+    const res = await Promise.resolve(farmRepo.update(collection, farmId, id, patch, expected)).catch(e => ({ ok: false, error: e }))
+    if (!res || !res.ok) {
+      if (res && res.conflict) { conflictRecover() }
+      else {
+        setList(prev => prev.map(x => String(x.id) === String(id) ? cur : x)) // ロールバック
+        try { showToast('保存に失敗しました。通信状態を確認してもう一度お試しください。', 'error') } catch (_) {}
+      }
+    }
+    return res || { ok: false }
+  }, [collection, farmId])
+  const removeById = React.useCallback(async (id) => {
+    if (!loadedRef.current) return notLoaded()
+    const cur = listRef.current.find(x => String(x.id) === String(id))
+    if (!cur) return { ok: true }
+    setList(prev => prev.filter(x => String(x.id) !== String(id)))
+    const res = await Promise.resolve(farmRepo.remove(collection, farmId, id, cur.version || 1)).catch(e => ({ ok: false, error: e }))
+    if (!res || !res.ok) {
+      if (res && res.conflict) { conflictRecover() }
+      else {
+        setList(prev => prev.some(x => String(x.id) === String(id)) ? prev : prev.concat([cur])) // ロールバック(復元)
+        try { showToast('削除に失敗しました。通信状態を確認してもう一度お試しください。', 'error') } catch (_) {}
+      }
+    }
+    return res || { ok: false }
+  }, [collection, farmId])
+  return { list, add, updateById, removeById, reload }
 }
 

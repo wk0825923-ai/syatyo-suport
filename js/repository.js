@@ -49,6 +49,38 @@
       try { localStorage.setItem(key, JSON.stringify(value)); return { ok: true } }
       catch (e) { return { ok: false, error: e } }
     },
+    // ── 記録系CRUD(同contract): localStorage版は配列を読み→1行操作→書き戻す ──
+    _recordList(collection, farmId) {
+      const key = collection + '_' + farmId
+      const r = this.readSync(key)
+      return { key, arr: (r.ok && r.found && Array.isArray(r.value)) ? r.value : [] }
+    },
+    createRecord(collection, farmId, record) {
+      const { key, arr } = this._recordList(collection, farmId)
+      if (arr.some(x => String(x.id) === String(record.id))) return { ok: true, duplicate: true, record } // 冪等
+      const w = this.write(key, arr.concat([record]))
+      return w.ok ? { ok: true, record } : w
+    },
+    updateRecord(collection, farmId, id, patch, expectedVersion) {
+      const { key, arr } = this._recordList(collection, farmId)
+      const idx = arr.findIndex(x => String(x.id) === String(id))
+      if (idx < 0) return { ok: false, error: new Error('対象の記録が見つかりません') }
+      const cur = arr[idx]
+      if (expectedVersion != null && (cur.version || 1) !== expectedVersion)
+        return { ok: false, conflict: true, error: new Error('別の端末で更新されています') }
+      const next = arr.slice(); next[idx] = Object.assign({}, cur, patch, { version: (cur.version || 1) + 1 })
+      const w = this.write(key, next)
+      return w.ok ? { ok: true } : w
+    },
+    removeRecord(collection, farmId, id, expectedVersion) {
+      const { key, arr } = this._recordList(collection, farmId)
+      const cur = arr.find(x => String(x.id) === String(id))
+      if (!cur) return { ok: true, alreadyGone: true } // 冪等
+      if (expectedVersion != null && (cur.version || 1) !== expectedVersion)
+        return { ok: false, conflict: true, error: new Error('別の端末で更新されています') }
+      const w = this.write(key, arr.filter(x => String(x.id) !== String(id)))
+      return w.ok ? { ok: true } : w
+    },
     subscribe(key, cb) {
       if (typeof window === 'undefined') return function () {}
       const handler = function (e) {
@@ -97,6 +129,30 @@
         ;(rows || []).forEach(r => { out[r.doc_id] = { ready: !!r.ready, updated: r.updated || '', note: r.note || '' } })
         return out
       },
+    },
+    // 整備記録(記録系CRUDパイロット): 1行単位のcreate/update/remove専用。write()全置換は禁止。
+    // 記録IDはクライアント発行のUUID。旧数値IDは移行時にlegacy_idへ。versionは楽観ロック用。
+    farm_maintenance_records: {
+      recordCrud: true,
+      toRow(rec, ctx) {
+        return {
+          id: String(rec.id), org_id: ctx.orgId, farm_id: ctx.farmId,
+          date: /^\d{4}-\d{2}-\d{2}/.test(String(rec.date)) ? String(rec.date).slice(0, 10) : null,
+          machine_name: String(rec.machine_name == null ? '' : rec.machine_name),
+          machine_no: String(rec.machine_no == null ? '' : rec.machine_no),
+          mtype: String(rec.mtype == null ? '' : rec.mtype),
+          result: String(rec.result == null ? '' : rec.result),
+          worker: String(rec.worker == null ? '' : rec.worker),
+          note: String(rec.note == null ? '' : rec.note),
+          version: Number.isFinite(Number(rec.version)) ? Math.trunc(Number(rec.version)) : 1,
+          legacy_id: (typeof rec.legacy_id === 'number') ? rec.legacy_id : null,
+        }
+      },
+      fromRow(r) {
+        return { id: r.id, date: r.date, machine_name: r.machine_name || '', machine_no: r.machine_no || '',
+          mtype: r.mtype || '', result: r.result || '', worker: r.worker || '', note: r.note || '', version: r.version || 1 }
+      },
+      fromRows(rows) { return (rows || []).map(r => this.fromRow(r)) },
     },
     // 月別平均気温: アプリ形 [12ヶ月の数値] ⇔ DB1行(farm_idで一意・temps jsonb)。1農場1行のsingleton型
     farm_monthly_temps: {
@@ -194,6 +250,8 @@
       const client = getSb()
       const orgId = this._ctx.orgId
       if (!table || !conv || !client) return { ok: false, error: new Error('未対応コレクション: ' + collection) }
+      // 記録系(1行単位CRUD)は配列全体の全置換writeを禁止＝削除意図の誤推測で他端末の記録を消さない
+      if (conv.recordCrud) return { ok: false, error: new Error('記録系はcreate/update/removeを使用（全置換write禁止）: ' + collection) }
       // 安全ガード: org_id/farm_id が未確定・不許可なら「絶対に何も書かない」（暴発でデータを消さない）
       if (!orgId) return { ok: false, error: new Error('org_idが未確定のため書き込み中止') }
       const bad = this._checkFarm(farmId); if (bad) return { ok: false, error: new Error(bad) }
@@ -239,6 +297,73 @@
       } catch (e) { return { ok: false, error: e } }
     },
 
+    // ── 記録系専用の1行単位CRUD（設計書: 記録系CRUD移行設計） ──
+    _recordGuard(collection, farmId) {
+      const table = KEY_TABLE[collection], conv = CONVERTERS[collection], client = getSb()
+      if (!table || !conv || !conv.recordCrud || !client) return { error: new Error('記録系CRUD未対応: ' + collection) }
+      if (!this._ctx.orgId) return { error: new Error('org_idが未確定のため中止') }
+      const bad = this._checkFarm(farmId); if (bad) return { error: new Error(bad) }
+      return { table, conv, client, orgId: this._ctx.orgId }
+    },
+    async createRecord(collection, farmId, record) {
+      const g = this._recordGuard(collection, farmId); if (g.error) return { ok: false, error: g.error }
+      try {
+        const row = g.conv.toRow(record, { orgId: g.orgId, farmId })
+        const ins = await g.client.from(g.table).insert([row])
+        if (ins.error) {
+          // 冪等: 同じidの再送(通信リトライ等)は二重登録せず成功扱い
+          if (String(ins.error.code) === '23505') return { ok: true, duplicate: true, record: g.conv.fromRow(row) }
+          return { ok: false, error: ins.error }
+        }
+        return { ok: true, record: g.conv.fromRow(row) }
+      } catch (e) { return { ok: false, error: e } }
+    },
+    async updateRecord(collection, farmId, id, patch, expectedVersion) {
+      const g = this._recordGuard(collection, farmId); if (g.error) return { ok: false, error: g.error }
+      try {
+        // patchはDB列名で渡す(整備記録はアプリ形と列名が1:1)。id/org/farm/legacyは書換禁止
+        const upd = Object.assign({}, patch, { version: (Number(expectedVersion) || 1) + 1 })
+        delete upd.id; delete upd.org_id; delete upd.farm_id; delete upd.legacy_id
+        let q = g.client.from(g.table).update(upd).eq('farm_id', farmId).eq('id', id)
+        if (expectedVersion != null) q = q.eq('version', expectedVersion) // 楽観ロック: 版が合う時だけ更新
+        const { data, error } = await q.select('id')
+        if (error) return { ok: false, error }
+        if (!data || !data.length) return { ok: false, conflict: true, error: new Error('別の端末で更新されています') }
+        return { ok: true }
+      } catch (e) { return { ok: false, error: e } }
+    },
+    async removeRecord(collection, farmId, id, expectedVersion) {
+      const g = this._recordGuard(collection, farmId); if (g.error) return { ok: false, error: g.error }
+      try {
+        let q = g.client.from(g.table).delete().eq('farm_id', farmId).eq('id', id)
+        if (expectedVersion != null) q = q.eq('version', expectedVersion)
+        const { data, error } = await q.select('id')
+        if (error) return { ok: false, error }
+        if (data && data.length) return { ok: true }
+        // 0件削除: 既に消えている(冪等=ok) or 版ズレ(conflict)。行の実在で判別する
+        const chk = await g.client.from(g.table).select('id').eq('farm_id', farmId).eq('id', id).limit(1)
+        if (chk.error) return { ok: false, error: chk.error }
+        if (chk.data && chk.data.length) return { ok: false, conflict: true, error: new Error('別の端末で更新されています') }
+        return { ok: true, alreadyGone: true }
+      } catch (e) { return { ok: false, error: e } }
+    },
+    // 記録系のリアルタイム: 全件再読込ではなくINSERT/UPDATE/DELETEを1行ずつ通知（編集中UIを壊さない）
+    subscribeRows(collection, farmId, cb) {
+      const table = KEY_TABLE[collection], conv = CONVERTERS[collection], client = getSb()
+      if (!table || !conv || !conv.recordCrud || !client || !client.channel) return function () {}
+      try {
+        const ch = client.channel('rtr_' + table + '_' + farmId + '_' + Math.random().toString(36).slice(2, 10))
+          .on('postgres_changes', { event: '*', schema: 'public', table: table, filter: 'farm_id=eq.' + farmId }, (payload) => {
+            try {
+              if (payload.eventType === 'DELETE') cb({ type: 'DELETE', id: payload.old && payload.old.id })
+              else cb({ type: payload.eventType, record: conv.fromRow(payload.new) })
+            } catch (_) {}
+          })
+          .subscribe()
+        return function () { try { client.removeChannel(ch) } catch (_) {} }
+      } catch (e) { return function () {} }
+    },
+
     subscribe(key, cb) {
       const collection = collectionOf(key), farmId = farmIdOf(key)
       const table = KEY_TABLE[collection]
@@ -275,6 +400,16 @@
       readAsync(key) { const r = pick(key); return Promise.resolve(r.readAsync ? r.readAsync(key) : r.readSync(key)) },
       write(key, value) { return pick(key).write(key, value) },
       subscribe(key, cb) { return pick(key).subscribe(key, cb) },
+      // ── 記録系の1行単位CRUD(意図明示・設計書参照)。routeに応じてDB/localStorageへ委譲 ──
+      create(collection, farmId, record) { const r = routes[collection] || LocalStorageRepository; return Promise.resolve(r.createRecord(collection, farmId, record)) },
+      update(collection, farmId, id, patch, expectedVersion) { const r = routes[collection] || LocalStorageRepository; return Promise.resolve(r.updateRecord(collection, farmId, id, patch, expectedVersion)) },
+      remove(collection, farmId, id, expectedVersion) { const r = routes[collection] || LocalStorageRepository; return Promise.resolve(r.removeRecord(collection, farmId, id, expectedVersion)) },
+      // 記録系のリアルタイム(1行単位)。localStorage経路は全量イベントをreplaceに変換して届ける
+      subscribeRows(collection, farmId, cb) {
+        const r = routes[collection] || LocalStorageRepository
+        if (r.subscribeRows) return r.subscribeRows(collection, farmId, cb)
+        return r.subscribe(collection + '_' + farmId, (value, meta) => cb({ type: 'replace', list: (meta && meta.found && Array.isArray(value)) ? value : [] }))
+      },
     }
   }
 
@@ -285,7 +420,7 @@
   //   ?dbdest=1 で退避を解除。node(QAハーネス)ではrouteしない=テストが自分で管理する。
   //   localhost(ブラウザQAハーネス環境)は既定OFF: 約45本のハーネスがlocalStorage直注入の従来挙動を
   //   前提にしているため。localhostでDB経路を試す時だけ ?dbdest=1 を付ける。DB経路の検証はqa_dbdest_live担当。
-  const ROUTED_COLLECTIONS = ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps']
+  const ROUTED_COLLECTIONS = ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records']
   try {
     if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
       const q = new URLSearchParams(window.location.search).get('dbdest')

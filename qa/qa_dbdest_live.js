@@ -73,9 +73,9 @@ const login = async (page) => {
       'count=' + (after && after.value ? after.value.length : 'x') + ' keys=' + JSON.stringify((after.value || []).map(d => d.key)))
 
     // ── 横展開テーブル: gap_documents / monthly_temps の本番往復（テストデータは自分で消す） ──
-    const routes3 = await A.evaluate(() => ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps']
+    const routes3 = await A.evaluate(() => ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records']
       .map(c => (farmRepo.routes[c] || {}).kind || 'none').join(','))
-    ok('C1: 3コレクションともDB経路にroute', routes3 === 'supabase,supabase,supabase', routes3)
+    ok('C1: 4コレクションともDB経路にroute', routes3 === 'supabase,supabase,supabase,supabase', routes3)
 
     const gRes = await A.evaluate(async () => {
       const k = 'farm_gap_documents_' + CONFIG.CURRENT_FARM_ID
@@ -100,6 +100,23 @@ const login = async (page) => {
       return { w: w.ok, got: mid.value.length === 12 && mid.value[3] === 12, w2: w2.ok, restored: fin.value.join(',') === (before.value || []).join(',') }
     })
     ok('C3: monthly_temps(singleton)の本番往復＋原状復帰', tRes.w && tRes.got && tRes.w2 && tRes.restored, JSON.stringify(tRes))
+
+    // ── 記録系CRUDパイロット: 整備記録の1行create→read→version更新→remove（本番・自動削除） ──
+    const mRes = await A.evaluate(async () => {
+      const col = 'farm_maintenance_records', fid = CONFIG.CURRENT_FARM_ID, k = col + '_' + fid
+      const id = (crypto.randomUUID ? crypto.randomUUID() : 'qa-' + Date.now())
+      const c = await farmRepo.create(col, fid, { id, date: '2026-07-12', machine_name: 'QA検証機(自動削除)', machine_no: 'QA-1', mtype: '点検', result: '異常なし', worker: '', note: '' })
+      const r1 = await farmRepo.readAsync(k)
+      const found = r1.ok && r1.value.some(x => String(x.id) === id)
+      const u = await farmRepo.update(col, fid, id, { note: 'live更新' }, 1)
+      const uConflict = await farmRepo.update(col, fid, id, { note: '古い版' }, 1) // 版ズレ→conflictのはず
+      const d = await farmRepo.remove(col, fid, id, 2)
+      const r2 = await farmRepo.readAsync(k)
+      const gone = r2.ok && !r2.value.some(x => String(x.id) === id)
+      return { c: c.ok, found, u: u.ok, conflict: !uConflict.ok && uConflict.conflict === true, d: d.ok, gone }
+    })
+    ok('C4: 整備記録CRUDの本番往復(create→update→版ズレconflict→remove)',
+      mRes.c && mRes.found && mRes.u && mRes.conflict && mRes.d && mRes.gone, JSON.stringify(mRes))
   } finally {
     // 途中で例外終了してもテスト行を残さない（成功時は各検査内で消えているので実質no-op）
     try {
@@ -120,6 +137,13 @@ const login = async (page) => {
           const t = await farmRepo.readAsync(tk)
           if (t && t.ok && Array.isArray(t.value) && t.value.join(',') === '1,2,6,12,17,21,25,26,21,15,9,3') {
             await farmRepo.write(tk, []) // テストで書いた気温だけ削除(実データはこの並びで書かない前提)
+          }
+          const mk = 'farm_maintenance_records_' + CONFIG.CURRENT_FARM_ID
+          const m = await farmRepo.readAsync(mk)
+          if (m && m.ok && Array.isArray(m.value)) {
+            for (const rec of m.value.filter(x => x.machine_name === 'QA検証機(自動削除)')) {
+              await farmRepo.remove('farm_maintenance_records', CONFIG.CURRENT_FARM_ID, rec.id) // 版指定なし=無条件削除
+            }
           }
         }, key)
       }
