@@ -76,20 +76,33 @@
   const [todayTasks, setTodayTasks] = useFPS('farm_today_tasks', INITIAL_TODAY_TASKS)
 
   // ── 農薬在庫管理 state（Step①: 新規追加） ──
-  const [pesticides,        setPesticides]       = useFPS('farm_pesticides',         INITIAL_PESTICIDES)
+  const [pesticides,        setPesticides,      reloadPesticides] = useFPS('farm_pesticides',         INITIAL_PESTICIDES)
   const [pesticideStock,    setPesticideStock]   = useFPS('farm_pesticide_stock',    INITIAL_PESTICIDE_STOCK)
   const [pesticidePurchases,setPesticidePurchases] = useFPS('farm_pesticide_purchases', INITIAL_PESTICIDE_PURCHASES)
 
   // ── 【サンプル農園実データ統合 フェーズ1・Step1-1】肥料マスタ・肥料在庫・肥料仕入れ・追肥記録 state ──
   // 既存のpesticides系stateとは完全に独立（混在させない）
-  const [fertilizers,         setFertilizers]         = useFPS('farm_fertilizers',           INITIAL_FERTILIZERS)
+  const [fertilizers,         setFertilizers,     reloadFertilizers] = useFPS('farm_fertilizers',           INITIAL_FERTILIZERS)
   const [fertilizerStock,     setFertilizerStock]     = useFPS('farm_fertilizer_stock',      INITIAL_FERTILIZER_STOCK)
   const [fertilizerPurchases, setFertilizerPurchases] = useFPS('farm_fertilizer_purchases',  INITIAL_FERTILIZER_PURCHASES)
   const [topDressingRecords,  setTopDressingRecords]  = useFPS('farm_top_dressing_records',  INITIAL_TOP_DRESSING_RECORDS)
 
 
   // ── 【フェーズE・E-4 Step4】ロット単位の農薬散布記録 state ──
-  const [lotSprayRecords, setLotSprayRecords] = useFPS('farm_lot_spray_records', INITIAL_LOT_SPRAY_RECORDS)
+  // 【在庫連動記録の切替第1弾】畝ロット散布は1行単位CRUD+在庫RPC(routed時)。localStorage経路は従来在庫調整。
+  const lotSpray = useRecordCollection('farm_lot_spray_records', farmKey, INITIAL_LOT_SPRAY_RECORDS)
+  const lotSprayRecords = lotSpray.list
+
+  // 【在庫表示のDB権威化】マスタ行に残高(stock_l等)が乗っている=DB経路。localStorage在庫表より優先して
+  // 表示用の在庫配列を合成する(components側は無変更で切替)。※DB経路時の仕入れ/棚卸しのDB化は在庫フェーズで対応。
+  const pesticideStockView = React.useMemo(() => {
+    if (!(pesticides || []).some(p => p && p.stock_l != null)) return pesticideStock
+    return pesticides.map(p => ({ pesticide_id: p.id, stock_L: Number(p.stock_l) || 0, alert_threshold_L: Number(p.alert_threshold_l) || 0 }))
+  }, [pesticides, pesticideStock])
+  const fertilizerStockView = React.useMemo(() => {
+    if (!(fertilizers || []).some(f => f && f.stock_kg != null)) return fertilizerStock
+    return fertilizers.map(f => ({ fertilizer_id: f.id, stock_kg: Number(f.stock_kg) || 0, alert_threshold_kg: Number(f.alert_threshold_kg) || 0 }))
+  }, [fertilizers, fertilizerStock])
 
   // ── 【畝ロット管理】圃場ごとの畝ロット（旧・静的LOTSの動的化） ──
   // { [field_id]: [lot, ...] } 形式。定植日報の保存で自動生成されるほか、
@@ -242,26 +255,46 @@
   // 既存のadjustStockロジックを流用し、各薬剤ごとに
   // 「使用した原液量（L）＝ 散布液量(L) ÷ 希釈倍率」を在庫から減算/復元する
   // =====================================================
-  const onSaveLotSprayRecord = (record) => {
-    const entry = { ...record, id: Date.now() }
-    setLotSprayRecords(prev => [...prev, entry])
-    ;(entry.pesticides || []).forEach(p => {
-      if (p.pesticide_id && Number(p.dilution) > 0 && Number(entry.spray_volume_L) > 0) {
-        const concentrateL = Number(entry.spray_volume_L) / Number(p.dilution)
-        adjustStock(p.pesticide_id, concentrateL)
-      }
-    })
+  // routed(DB経路)なら在庫RPC=記録+通帳+残高が1トランザクション。祝福はRPC成功後だけ。
+  // localStorage経路は従来どおりアプリ側で在庫調整(オフライン・QAハーネス互換)。
+  const lotSprayStockRouted = () => !!(farmRepo.isStockRouted && farmRepo.isStockRouted('farm_lot_spray_records'))
+  const lotSprayMovements = (record) => (record.pesticides || [])
+    .filter(p => p.pesticide_id && Number(p.dilution) > 0 && Number(record.spray_volume_L) > 0)
+    .map(p => ({ item_type: 'pesticide', item_id: String(p.pesticide_id),
+      delta_amount: -(Number(record.spray_volume_L) / Number(p.dilution)), unit: 'L', reason: '農薬散布' }))
+  const onSaveLotSprayRecord = async (record) => {
+    if (lotSprayStockRouted()) {
+      const res = await lotSpray.addWithStock(record, lotSprayMovements(record))
+      if (res && res.ok) { celebrateSave('農薬散布を記録！'); reloadPesticides() } // 残高即時反映(realtimeが保険)
+      return res
+    }
+    const res = await lotSpray.add(record)
+    if (res && res.ok) {
+      ;(record.pesticides || []).forEach(p => {
+        if (p.pesticide_id && Number(p.dilution) > 0 && Number(record.spray_volume_L) > 0) {
+          adjustStock(p.pesticide_id, Number(record.spray_volume_L) / Number(p.dilution))
+        }
+      })
+      celebrateSave('農薬散布を記録！')
+    }
+    return res
   }
-  const onDeleteLotSprayRecord = (id) => {
-    const rec = lotSprayRecords.find(x => x.id === id)
-    setLotSprayRecords(prev => prev.filter(x => x.id !== id))
-    if (!rec) return
-    ;(rec.pesticides || []).forEach(p => {
-      if (p.pesticide_id && Number(p.dilution) > 0 && Number(rec.spray_volume_L) > 0) {
-        const concentrateL = Number(rec.spray_volume_L) / Number(p.dilution)
-        adjustStock(p.pesticide_id, -concentrateL)
-      }
-    })
+  const onDeleteLotSprayRecord = async (id) => {
+    if (lotSprayStockRouted()) {
+      const res = await lotSpray.removeWithStock(id)
+      if (res && res.ok) reloadPesticides()
+      return res
+    }
+    const rec = lotSprayRecords.find(x => String(x.id) === String(id))
+    const res = await lotSpray.removeById(id)
+    if (res && res.ok && rec) {
+      ;(rec.pesticides || []).forEach(p => {
+        if (p.pesticide_id && Number(p.dilution) > 0 && Number(rec.spray_volume_L) > 0) {
+          adjustStock(p.pesticide_id, -(Number(rec.spray_volume_L) / Number(p.dilution)))
+        }
+      })
+    }
+    return res
   }
 
   // =====================================================
@@ -438,7 +471,7 @@
   const addTodayTask    = task => setTodayTasks(p => [...p, task])
 
   const pageMap = {
-    dashboard:         () => React.createElement(Dashboard,   { fields, records, staff, gap, todayTasks, onToggleTodayTask:toggleTodayTask, onAddTodayTask:addTodayTask, cropPlans, pesticides, pesticideStock, fertilizers, fertilizerStock, lotSprayRecords, maintenanceRecords, gapCtx:{ records, lotSprayRecords, pesticides, pesticidePurchases, topDressingRecords, fertilizerPurchases, harvestRecords, shipmentRecords, maintenanceRecords, staff, farmLots, fields }, onNavigate: p => setPage(p), onSaveRecord: onSaveRecordWithStock, onUpdateRecord: onUpdateRecordWithStock, onDeleteRecord: onDeleteRecordWithStock }),
+    dashboard:         () => React.createElement(Dashboard,   { fields, records, staff, gap, todayTasks, onToggleTodayTask:toggleTodayTask, onAddTodayTask:addTodayTask, cropPlans, pesticides, pesticideStock: pesticideStockView, fertilizers, fertilizerStock: fertilizerStockView, lotSprayRecords, maintenanceRecords, gapCtx:{ records, lotSprayRecords, pesticides, pesticidePurchases, topDressingRecords, fertilizerPurchases, harvestRecords, shipmentRecords, maintenanceRecords, staff, farmLots, fields }, onNavigate: p => setPage(p), onSaveRecord: onSaveRecordWithStock, onUpdateRecord: onUpdateRecordWithStock, onDeleteRecord: onDeleteRecordWithStock }),
     record_list:       () => React.createElement(RecordTablePage, { records, fields, pesticides, onUpdate: onUpdateRecordWithStock, onDelete: onDeleteRecordWithStock, cropCycles, onUpdateRecordCycle, focusRecordId, onClearFocus: () => setFocusRecordId(null) }),
     export:            () => React.createElement(GapExport,  { gap, onToggle:id=>setGap(p=>p.map(c=>c.id===id?{...c,is_cleared:!c.is_cleared}:c)), records, fields, pesticides, ctx:{ records, lotSprayRecords, pesticides, pesticidePurchases, topDressingRecords, fertilizerPurchases, harvestRecords, shipmentRecords, maintenanceRecords, staff, farmLots, fields } }),
     field_map:         () => React.createElement(FieldMapPage,   { fields, onAdd:f=>{setFields(p=>[...p,f]);celebrateSave('圃場を追加！')}, onDelete:id=>setFields(p=>p.filter(f=>String(f.id)!==String(id))), onUpdateField:(id,patch)=>setFields(p=>p.map(f=>String(f.id)===String(id)?{...f,...patch}:f)), cropCycles, onNavigate:setPage, cropCategories, farmLots, lotSprayRecords, topDressingRecords, harvestRecords, pesticides }),
@@ -448,7 +481,7 @@
     // 【必要書類ナビ/文書管理台帳】GAP原則ごとに必要文書(実データ36)の整備状況を管理
     gap_documents:     () => React.createElement(GapDocumentRegistry, { gap, docsState:gapDocs, onUpdateDoc:(id,patch)=>setGapDocs(s=>({ ...s, [id]:{ ...(s[id]||{}), ...patch } })) }),
     // 【突合せ】記録の食い違い・入力ミスを横断点検（原因と対処つき）
-    integrity_check:   () => React.createElement(FarmIntegrityPage, { records, lotSprayRecords, topDressingRecords, harvestRecords, shipmentRecords, farmLots, fields, pesticides, fertilizers, pesticideStock, pesticidePurchases, fertilizerStock, fertilizerPurchases, onNavigate:navigateTo }),
+    integrity_check:   () => React.createElement(FarmIntegrityPage, { records, lotSprayRecords, topDressingRecords, harvestRecords, shipmentRecords, farmLots, fields, pesticides, fertilizers, pesticideStock: pesticideStockView, pesticidePurchases, fertilizerStock: fertilizerStockView, fertilizerPurchases, onNavigate:navigateTo }),
     gap_package:       () => React.createElement(GapExport,   { gap, onToggle:id=>setGap(p=>p.map(c=>c.id===id?{...c,is_cleared:!c.is_cleared}:c)), records, fields, pesticides, ctx:{ records, lotSprayRecords, pesticides, pesticidePurchases, topDressingRecords, fertilizerPurchases, harvestRecords, shipmentRecords, maintenanceRecords, staff, farmLots, fields } }),
     staff:             () => React.createElement(StaffList,   { staff, onAdd:s=>{setStaff(p=>[...p,s]);celebrateSave('スタッフを追加！')}, onDelete:id=>setStaff(p=>p.filter(s=>s.id!==id)), onUpdate:s=>setStaff(p=>p.map(x=>x.id===s.id?s:x)) }),
     // 【実装手順書 A】技能実習生 作業日誌
@@ -472,7 +505,7 @@
     crop_categories:   () => React.createElement(CropCategoryPage, { categories: cropCategories, onSave: setCropCategories }),
     pesticide_master:  () => React.createElement(PesticideMasterPage, {
       pesticides,
-      pesticideStock,
+      pesticideStock: pesticideStockView,
       pesticidePurchases,
       onAdd:         onAddPesticide,
       onUpdate:      onUpdatePesticide,
@@ -484,7 +517,7 @@
     // 【サンプル農園実データ統合 フェーズ3・Step3-1】肥料マスタ管理ページ
     fertilizer_master: () => React.createElement(FertilizerMasterPage, {
       fertilizers,
-      fertilizerStock,
+      fertilizerStock: fertilizerStockView,
       fertilizerPurchases,
       topDressingRecords,
       fields,

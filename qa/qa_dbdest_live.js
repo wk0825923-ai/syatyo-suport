@@ -210,6 +210,37 @@ const login = async (page) => {
     })
     ok('C9: 畝ロットの本番往復(圃場参照つきflatten⇔group+legacy_id保持)',
       ltRes.wf && ltRes.wl && ltRes.got && ltRes.legacy && ltRes.wl2 && ltRes.wf2 && ltRes.gone, JSON.stringify(ltRes))
+
+    // ── 畝ロット散布=在庫RPC切替(アプリ契約): createWithStock→記録往復+マスタ残高減算(fromRows復元)→removeWithStockで完全復帰 ──
+    const spRes = await A.evaluate(async () => {
+      const col = 'farm_lot_spray_records', fid = CONFIG.CURRENT_FARM_ID
+      const pk = 'farm_pesticides_' + fid, sk = col + '_' + fid
+      // QA農薬(在庫18L)をDBに直接作成
+      const farmRow = await sb.from('farm_farms').select('org_id').eq('id', fid).limit(1)
+      const orgId = farmRow.data[0].org_id
+      const pid = crypto.randomUUID()
+      await sb.from('farm_pesticides').insert([{ id: pid, org_id: orgId, farm_id: fid, name: 'QA-APP農薬(自動削除)', reg_no: 'QA', dilution: 1000, max_times: 3, preharvest_days: 7, stock_l: 18 }])
+      const rec = { id: crypto.randomUUID(), field_id: null, date: '2026-07-13', row_range: '1-3',
+        pesticides: [{ pesticide_id: pid, dilution: 1000, disposal_amount: 0 }], spray_volume_L: 500,
+        weather: '晴', note: 'QA-APP(自動削除)', staff_ids: [], checks: { kanri: true } }
+      const mov = [{ item_type: 'pesticide', item_id: pid, delta_amount: -0.5, unit: 'L', reason: '農薬散布' }]
+      const c = await farmRepo.createWithStock(col, fid, rec, mov)
+      const r1 = await farmRepo.readAsync(sk)
+      const got = r1.ok ? r1.value.find(x => String(x.id) === rec.id) : null
+      const m1 = await farmRepo.readAsync(pk)
+      const p1 = m1.ok ? m1.value.find(x => String(x.id) === pid) : null
+      const d = await farmRepo.removeWithStock(col, fid, rec.id, 1)
+      const m2 = await farmRepo.readAsync(pk)
+      const p2 = m2.ok ? m2.value.find(x => String(x.id) === pid) : null
+      // 片付け
+      await sb.from('farm_stock_movements').delete().eq('item_id', pid)
+      await sb.from('farm_pesticides').delete().eq('id', pid)
+      return { c: !!(c && c.ok), found: !!got, vol: got && got.spray_volume_L, checks: got && got.checks && got.checks.kanri === true,
+        stockAfterSave: p1 && p1.stock_l, d: !!(d && d.ok), stockAfterDelete: p2 && p2.stock_l }
+    })
+    ok('C10: 在庫RPC切替の本番往復(createWithStock=記録+残高18→17.5L・converter往復(液量/checks)・removeWithStockで18L復帰)',
+      spRes.c && spRes.found && spRes.vol === 500 && spRes.checks && spRes.stockAfterSave === 17.5 && spRes.d && spRes.stockAfterDelete === 18,
+      JSON.stringify(spRes))
   } finally {
     // 途中で例外終了してもテスト行を残さない（成功時は各検査内で消えているので実質no-op）
     try {

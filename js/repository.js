@@ -279,6 +279,9 @@
             preharvest_days: r.preharvest_days != null ? Number(r.preharvest_days) : null,
             target_crop: r.target_crop || '',
           }
+          // 在庫表示のDB権威化: 残高列を読みだけ復元(toRowsには含めない=マスタ編集でDB残高を上書きしない)
+          if (r.stock_l != null) out.stock_l = Number(r.stock_l)
+          if (r.alert_threshold_l != null) out.alert_threshold_l = Number(r.alert_threshold_l)
           if (r.legacy_id != null) out.legacy_id = Number(r.legacy_id) // masterByIdの旧数値ID解決に使う
           return out
         })
@@ -317,10 +320,50 @@
             blend_components: r.blend_components || null,
             weight_unconfirmed: !!r.weight_unconfirmed,
           }
+          // 在庫表示のDB権威化: 残高列を読みだけ復元(toRowsには含めない)
+          if (r.stock_kg != null) out.stock_kg = Number(r.stock_kg)
+          if (r.alert_threshold_kg != null) out.alert_threshold_kg = Number(r.alert_threshold_kg)
           if (r.legacy_id != null) out.legacy_id = Number(r.legacy_id)
           return out
         })
       },
+    },
+    // 畝ロット散布(在庫連動記録・RPC専用): 保存/削除はcreateWithStock/removeWithStock経由。
+    // toRowは実列名(小文字)のjsonbを完成させて渡す契約(RPCのjsonb_populate_record用・version必須)。
+    farm_lot_spray_records: {
+      recordCrud: true,
+      stockRpc: true, // 在庫連動=通常のcreate/update/removeでなくRPC(farm_save_record_with_stock)を使う
+      toRow(rec, ctx) {
+        const isUuid = (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v))
+        return {
+          id: String(rec.id), org_id: ctx.orgId, farm_id: ctx.farmId,
+          field_id: isUuid(rec.field_id) ? String(rec.field_id) : null,
+          date: /^\d{4}-\d{2}-\d{2}/.test(String(rec.date)) ? String(rec.date).slice(0, 10) : null,
+          row_range: String(rec.row_range == null ? '' : rec.row_range),
+          pesticides: Array.isArray(rec.pesticides) ? rec.pesticides : [],
+          spray_volume_l: Number(rec.spray_volume_L) || 0, // アプリ形は大文字L・DB列は小文字
+          weather: String(rec.weather == null ? '' : rec.weather),
+          worker: String(rec.worker == null ? '' : rec.worker),
+          note: String(rec.note == null ? '' : rec.note),
+          staff_ids: Array.isArray(rec.staff_ids) ? rec.staff_ids : [],
+          checks: (rec.checks && typeof rec.checks === 'object') ? rec.checks : {},
+          version: Number.isFinite(Number(rec.version)) ? Math.trunc(Number(rec.version)) : 1,
+          legacy_id: (typeof rec.legacy_id === 'number') ? rec.legacy_id : null,
+        }
+      },
+      fromRow(r) {
+        const out = {
+          id: r.id, field_id: r.field_id, date: r.date, row_range: r.row_range || '',
+          pesticides: Array.isArray(r.pesticides) ? r.pesticides : [],
+          spray_volume_L: r.spray_volume_l != null ? Number(r.spray_volume_l) : 0,
+          weather: r.weather || '', worker: r.worker || '', note: r.note || '',
+          staff_ids: Array.isArray(r.staff_ids) ? r.staff_ids : [],
+          checks: r.checks || {}, version: r.version || 1,
+        }
+        if (r.legacy_id != null) out.legacy_id = Number(r.legacy_id)
+        return out
+      },
+      fromRows(rows) { return (rows || []).map(r => this.fromRow(r)) },
     },
     // 整備記録(記録系CRUDパイロット): 1行単位のcreate/update/remove専用。write()全置換は禁止。
     // 記録IDはクライアント発行のUUID。旧数値IDは移行時にlegacy_idへ。versionは楽観ロック用。
@@ -567,6 +610,39 @@
         return { ok: true, alreadyGone: true }
       } catch (e) { return { ok: false, error: e } }
     },
+    // ── 在庫連動記録のRPC契約（設計図: 在庫RPC設計図）──
+    // 記録insert＋通帳記帳＋残高更新をDB内1トランザクションで行う。movementsはアプリの
+    // 消費モデルで計算した値を渡すが、RPCが記録から期待量を再計算して検証する(クライアント不信)。
+    async createRecordWithStock(collection, farmId, record, movements) {
+      const g = this._recordGuard(collection, farmId); if (g.error) return { ok: false, error: g.error }
+      try {
+        const row = g.conv.toRow(record, { orgId: g.orgId, farmId })
+        const { data, error } = await g.client.rpc('farm_save_record_with_stock',
+          { p_table: g.table, p_record: row, p_movements: movements || [] })
+        if (error) return { ok: false, error }
+        return Object.assign({ record: g.conv.fromRow(row) }, data)
+      } catch (e) { return { ok: false, error: e } }
+    },
+    async updateRecordWithStock(collection, farmId, record, movements, expectedVersion) {
+      const g = this._recordGuard(collection, farmId); if (g.error) return { ok: false, error: g.error }
+      try {
+        const row = g.conv.toRow(record, { orgId: g.orgId, farmId })
+        const { data, error } = await g.client.rpc('farm_update_record_with_stock',
+          { p_table: g.table, p_record: row, p_movements: movements || [], p_expected_version: expectedVersion })
+        if (error) return { ok: false, error }
+        return data
+      } catch (e) { return { ok: false, error: e } }
+    },
+    async removeRecordWithStock(collection, farmId, id, expectedVersion) {
+      const g = this._recordGuard(collection, farmId); if (g.error) return { ok: false, error: g.error }
+      try {
+        const { data, error } = await g.client.rpc('farm_delete_record_with_stock',
+          { p_table: g.table, p_farm_id: farmId, p_record_id: id, p_expected_version: expectedVersion == null ? null : expectedVersion })
+        if (error) return { ok: false, error }
+        return data
+      } catch (e) { return { ok: false, error: e } }
+    },
+
     // 記録系のリアルタイム: 全件再読込ではなくINSERT/UPDATE/DELETEを1行ずつ通知（編集中UIを壊さない）
     subscribeRows(collection, farmId, cb) {
       const table = KEY_TABLE[collection], conv = CONVERTERS[collection], client = getSb()
@@ -624,6 +700,23 @@
       create(collection, farmId, record) { const r = routes[collection] || LocalStorageRepository; return Promise.resolve(r.createRecord(collection, farmId, record)) },
       update(collection, farmId, id, patch, expectedVersion) { const r = routes[collection] || LocalStorageRepository; return Promise.resolve(r.updateRecord(collection, farmId, id, patch, expectedVersion)) },
       remove(collection, farmId, id, expectedVersion) { const r = routes[collection] || LocalStorageRepository; return Promise.resolve(r.removeRecord(collection, farmId, id, expectedVersion)) },
+      // ── 在庫連動記録のRPC契約。routedならRPC、localStorage経路は通常CRUD(在庫はアプリ側が調整) ──
+      isStockRouted(collection) { const r = routes[collection]; return !!(r && r.createRecordWithStock) },
+      createWithStock(collection, farmId, record, movements) {
+        const r = routes[collection]
+        if (r && r.createRecordWithStock) return Promise.resolve(r.createRecordWithStock(collection, farmId, record, movements))
+        return Promise.resolve(LocalStorageRepository.createRecord(collection, farmId, record))
+      },
+      updateWithStock(collection, farmId, record, movements, expectedVersion) {
+        const r = routes[collection]
+        if (r && r.updateRecordWithStock) return Promise.resolve(r.updateRecordWithStock(collection, farmId, record, movements, expectedVersion))
+        return Promise.resolve(LocalStorageRepository.updateRecord(collection, farmId, record.id, record, expectedVersion))
+      },
+      removeWithStock(collection, farmId, id, expectedVersion) {
+        const r = routes[collection]
+        if (r && r.removeRecordWithStock) return Promise.resolve(r.removeRecordWithStock(collection, farmId, id, expectedVersion))
+        return Promise.resolve(LocalStorageRepository.removeRecord(collection, farmId, id, expectedVersion))
+      },
       // 記録系のリアルタイム(1行単位)。localStorage経路は全量イベントをreplaceに変換して届ける
       subscribeRows(collection, farmId, cb) {
         const r = routes[collection] || LocalStorageRepository
@@ -640,7 +733,7 @@
   //   ?dbdest=1 で退避を解除。node(QAハーネス)ではrouteしない=テストが自分で管理する。
   //   localhost(ブラウザQAハーネス環境)は既定OFF: 約45本のハーネスがlocalStorage直注入の従来挙動を
   //   前提にしているため。localhostでDB経路を試す時だけ ?dbdest=1 を付ける。DB経路の検証はqa_dbdest_live担当。
-  const ROUTED_COLLECTIONS = ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records', 'farm_shipment_records', 'farm_pesticides', 'farm_fertilizers', 'farm_fields_v2', 'farm_lots']
+  const ROUTED_COLLECTIONS = ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records', 'farm_shipment_records', 'farm_pesticides', 'farm_fertilizers', 'farm_fields_v2', 'farm_lots', 'farm_lot_spray_records']
   try {
     if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
       const q = new URLSearchParams(window.location.search).get('dbdest')

@@ -4820,7 +4820,7 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
       (form.field_ids && form.field_ids.length > 1) ? React.createElement('span', { style:{ fontSize:12, color:'#B45309' } }, '※畝の記録は主圃場のみ') : null
     )
     let el
-    if (kind === 'spray')     el = React.createElement(LotSprayRecordForm,    { field:selField, pesticides:pesticides||[], lots, staff, defaultWeather:suggestedWeather, pastSprays:lotSprayRecords||[], onCancel:backToStep2, onSave:(r)=>{ onSaveLotSpray(r); clearDraft(); setDraftSaved(false); backToStep2() } })
+    if (kind === 'spray')     el = React.createElement(LotSprayRecordForm,    { field:selField, pesticides:pesticides||[], lots, staff, defaultWeather:suggestedWeather, pastSprays:lotSprayRecords||[], onCancel:backToStep2, onSave: async (r)=>{ const res = await Promise.resolve(onSaveLotSpray(r)).catch(()=>null); if (res && res.ok === false) return res; clearDraft(); setDraftSaved(false); backToStep2(); return res } })
     else if (kind === 'fert') el = React.createElement(TopDressingRecordForm, { field:selField, fertilizers:fertilizers||[], lots, staff, onCancel:backToStep2, onSave:(r)=>{ onSaveTopDressing(r); clearDraft(); setDraftSaved(false); backToStep2() } })
     else                      el = React.createElement(HarvestRecordForm,     { field:selField, lots, destinations:destinations||[], harvestRecords:harvestRecords||[], staff, onCancel:backToStep2, onSave:(r)=>{ onSaveHarvest(r); clearDraft(); setDraftSaved(false) } })
     return React.createElement('div', null, header, el)
@@ -6194,12 +6194,13 @@ function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff, 
     items.length > 0 && items.every(it => it.pesticide_id && Number(it.dilution) > 0)
 
   const submittingRef = React.useRef(false)
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!valid) { showToast('日付・畝範囲・散布量・農薬と希釈倍率を入力してください', 'warn'); return }
     if (submittingRef.current) return   // 連打による二重登録を防止
     submittingRef.current = true
     setTimeout(() => { submittingRef.current = false }, 1200)
-    onSave({
+    // 祝福(紙吹雪)は保存側(app.js)がRPC/保存成功をawaitした後に出す。失敗時はフォームを保持する
+    const res = await Promise.resolve(onSave({
       field_id: field.id,
       date,
       weather,
@@ -6213,8 +6214,8 @@ function LotSprayRecordForm({ field, pesticides, lots, onSave, onCancel, staff, 
       note: note.trim(),
       checks,
       staff_ids: staffIds,
-    })
-    celebrateSave('農薬散布を記録！')
+    })).catch(() => null)
+    if (res && res.ok === false) { submittingRef.current = false; return } // 失敗: 入力を残して再試行可能に
   }
 
   return React.createElement('div', null,
@@ -16872,7 +16873,16 @@ function usePersistState(key, initial) {
     })
     return unsubscribe
   }, [key])
-  return [state, setPersist]
+  // 第3戻り値reload: DBの権威状態を明示的に読み直す(在庫RPC成功後のマスタ残高即時反映用。realtimeが保険)。
+  // 世代・編集リビジョンの門番つき=遅延したreloadが新しい編集/別農場を上書きしない。
+  const reload = React.useCallback(async () => {
+    const gen = genRef.current
+    const rev = editRevRef.current
+    const r = await Promise.resolve(farmRepo.readAsync(key)).catch(() => null)
+    if (genRef.current !== gen || editRevRef.current !== rev) return
+    if (r && r.ok) setState((r.found && r.value !== undefined) ? r.value : initial)
+  }, [key])
+  return [state, setPersist, reload]
 }
 
 // 【記録系専用】1行単位CRUDのコレクションフック（設計書: 中川農園_記録系CRUD移行設計.html）
@@ -16973,6 +16983,39 @@ function useRecordCollection(collection, farmId, initial) {
     }
     return res || { ok: false }
   }, [collection, farmId])
-  return { list, add, updateById, removeById, reload }
+  // ── 在庫連動記録(RPC経由)。routed=DBならRPC(記録+通帳+残高が1トランザクション)、
+  //    localStorage経路なら通常create/remove(在庫調整は呼び出し側=app.jsの従来ロジックが担当) ──
+  const addWithStock = React.useCallback(async (record, movements) => {
+    if (!loadedRef.current) return notLoaded()
+    const gen = genRef.current
+    const rec = Object.assign({}, record)
+    if (rec.id == null) rec.id = newUuid()
+    if (rec.version == null) rec.version = 1
+    setList(prev => prev.concat([rec])) // 楽観的更新
+    const res = await Promise.resolve(farmRepo.createWithStock(collection, farmId, rec, movements)).catch(e => ({ ok: false, error: e }))
+    if (!res || !res.ok) {
+      if (genRef.current === gen) setList(prev => prev.filter(x => String(x.id) !== String(rec.id))) // ロールバック
+      console.warn('[useRecordCollection] 追加失敗(在庫連動):', collection, res && res.error)
+      try { showToast('保存に失敗しました: ' + ((res && res.error && res.error.message) || '通信状態を確認してください'), 'error') } catch (_) {}
+    }
+    return res || { ok: false }
+  }, [collection, farmId])
+  const removeWithStock = React.useCallback(async (id) => {
+    if (!loadedRef.current) return notLoaded()
+    const gen = genRef.current
+    const cur = listRef.current.find(x => String(x.id) === String(id))
+    if (!cur) return { ok: true }
+    setList(prev => prev.filter(x => String(x.id) !== String(id)))
+    const res = await Promise.resolve(farmRepo.removeWithStock(collection, farmId, id, cur.version || 1)).catch(e => ({ ok: false, error: e }))
+    if (!res || !res.ok) {
+      if (res && res.conflict) { if (genRef.current === gen) conflictRecover() }
+      else {
+        if (genRef.current === gen) setList(prev => prev.some(x => String(x.id) === String(id)) ? prev : prev.concat([cur]))
+        try { showToast('削除に失敗しました。通信状態を確認してもう一度お試しください。', 'error') } catch (_) {}
+      }
+    }
+    return res || { ok: false }
+  }, [collection, farmId])
+  return { list, add, updateById, removeById, reload, addWithStock, removeWithStock }
 }
 
