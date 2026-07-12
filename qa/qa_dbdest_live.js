@@ -73,9 +73,9 @@ const login = async (page) => {
       'count=' + (after && after.value ? after.value.length : 'x') + ' keys=' + JSON.stringify((after.value || []).map(d => d.key)))
 
     // ── 横展開テーブル: gap_documents / monthly_temps の本番往復（テストデータは自分で消す） ──
-    const routes3 = await A.evaluate(() => ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records', 'farm_shipment_records']
+    const routes3 = await A.evaluate(() => ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records', 'farm_shipment_records', 'farm_pesticides']
       .map(c => (farmRepo.routes[c] || {}).kind || 'none').join(','))
-    ok('C1: 5コレクションともDB経路にroute', routes3 === 'supabase,supabase,supabase,supabase,supabase', routes3)
+    ok('C1: 6コレクションともDB経路にroute', routes3 === 'supabase,supabase,supabase,supabase,supabase,supabase', routes3)
 
     const gRes = await A.evaluate(async () => {
       const k = 'farm_gap_documents_' + CONFIG.CURRENT_FARM_ID
@@ -130,6 +130,21 @@ const login = async (page) => {
       return { c: c.ok, found: !!rec, types: rec ? (rec.cases === 1 && rec.harvest_date === '2026-07-10') : false, d: d.ok, gone }
     })
     ok('C5: 出荷記録CRUDの本番往復(型保持含む)', sRes.c && sRes.found && sRes.types && sRes.d && sRes.gone, JSON.stringify(sRes))
+
+    // ── 農薬マスタ(マスタUUID化第1弾): 差分同期の本番往復＋legacy_id保持（自動削除） ──
+    const pRes = await A.evaluate(async () => {
+      const k = 'farm_pesticides_' + CONFIG.CURRENT_FARM_ID
+      const before = await farmRepo.readAsync(k)
+      const id = (crypto.randomUUID ? crypto.randomUUID() : 'qa-' + Date.now())
+      const test = { id, name: 'QA検証農薬(自動削除)', reg_no: 'QA-0001', dilution: 1000, max_times: 3, preharvest_days: 7, target_crop: 'レタス', legacy_id: 990001 }
+      const w = await farmRepo.write(k, (before.value || []).concat([test]))
+      const mid = await farmRepo.readAsync(k)
+      const rec = mid.ok ? mid.value.find(x => String(x.id) === id) : null
+      const w2 = await farmRepo.write(k, mid.value.filter(x => String(x.id) !== id))
+      const fin = await farmRepo.readAsync(k)
+      return { w: w.ok, found: !!rec, legacy: rec ? rec.legacy_id === 990001 : false, w2: w2.ok, gone: fin.ok && !fin.value.some(x => String(x.id) === id) }
+    })
+    ok('C6: 農薬マスタの本番往復(uuid+legacy_id保持・差分delete)', pRes.w && pRes.found && pRes.legacy && pRes.w2 && pRes.gone, JSON.stringify(pRes))
   } finally {
     // 途中で例外終了してもテスト行を残さない（成功時は各検査内で消えているので実質no-op）
     try {
