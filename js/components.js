@@ -2799,7 +2799,7 @@ function PesticideInput({ pesticides, records, fieldId, pesticideId, crop, field
   // 作物に紐づく農薬が1種類だけなら自動セット（手入力不要）
   const autoSelectId = cropMap && availablePesticides.length === 1 ? availablePesticides[0].id : null
 
-  const [selectedId, setSelectedId] = React.useState(pesticideId ? Number(pesticideId) : autoSelectId)
+  const [selectedId, setSelectedId] = React.useState((pesticideId != null && pesticideId !== '') ? pesticideId : autoSelectId) // UUID対応: Number()はNaN化するため禁止
   // 【新規】散布液量（L/10a）をスライダーで管理
   const [sprayLiquidPerTenare, setSprayLiquidPerTenare] = React.useState(500)
 
@@ -2808,7 +2808,7 @@ function PesticideInput({ pesticides, records, fieldId, pesticideId, crop, field
   const mapEntry   = cropMap && selected ? cropMap.find(c => String(c.pesticide_id) === String(selected.id) || (selected.legacy_id != null && String(c.pesticide_id) === String(selected.legacy_id))) : null
   const dilution   = mapEntry ? mapEntry.dilution : (selected ? selected.dilution : 1000)
   // 使用回数は日報の農薬散布 + 農薬散布タブ（ロット単位）の記録を合算した参考値
-  const usedTimes  = countPesticideUse(records, fieldId, selectedId, lotSprayRecords || [])
+  const usedTimes  = countPesticideUse(records, fieldId, selectedId, lotSprayRecords || [], selected)
   const isOver     = isPesticideOverLimit(records, fieldId, selected, lotSprayRecords || [])
   const remaining  = selected ? selected.max_times - usedTimes : null
 
@@ -2849,7 +2849,7 @@ function PesticideInput({ pesticides, records, fieldId, pesticideId, crop, field
       ),
       React.createElement('div', { style:{ display:'flex', flexDirection:'column', gap:'6px' } },
         ...availablePesticides.map(p => {
-          const used = countPesticideUse(records, fieldId, p.id)
+          const used = countPesticideUse(records, fieldId, p.id, [], p)
           const over = used >= p.max_times
           const sel  = String(selectedId) === String(p.id)
           const pDilution = cropMap ? (cropMap.find(c => String(c.pesticide_id) === String(p.id) || (p.legacy_id != null && String(c.pesticide_id) === String(p.legacy_id))) || {}).dilution || p.dilution : p.dilution
@@ -8847,7 +8847,7 @@ function FieldList({ fields, onAdd, onDelete, onUpdateField, mode='full', cropCy
       const btn  = node && node.querySelector('.popup-goto-field')
       if (btn) btn.onclick = () => onNavigate && onNavigate('field:' + btn.getAttribute('data-field-id') + ':dashboard')
       const dbtn = node && node.querySelector('.popup-draw-boundary')
-      if (dbtn) dbtn.onclick = () => startBoundary(Number(dbtn.getAttribute('data-field-id')))
+      if (dbtn) dbtn.onclick = () => startBoundary(dbtn.getAttribute('data-field-id')) // UUID対応: masterByIdがString解決する
     })
   },[fields, farmLots, lotSprayRecords, topDressingRecords, harvestRecords, pesticides])
   // 描画中の輪郭（点線ポリゴン＋角マーカー）を再描画

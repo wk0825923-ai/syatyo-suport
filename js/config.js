@@ -135,18 +135,23 @@ function calcDaysLeft(dateStr) {
 // lotSprayRecords（農薬散布タブのロット単位記録）も同じ圃場×農薬の使用回数として合算する。
 // 日報とロット記録で同じ散布を二重登録した場合は多めにカウントされる（安全側に倒す）。
 // ※ 使用回数の上限は本来「作付け1回あたり」「有効成分ごと」で決まるため、これは参考値。
-function countPesticideUse(records, fieldId, pesticideId, lotSprayRecords = []) {
+// 【UUID対応(Codexレビュー6 Critical)】Number(fieldId)はUUIDでNaN化し使用回数が常に0件＝
+// 上限警告が無効化されるため、String比較に統一。pesticide(マスタ行)を渡すと旧数値ID記録も
+// legacy_idで合算する（UUID化後も過去の散布回数を取りこぼさない＝安全側）。
+function countPesticideUse(records, fieldId, pesticideId, lotSprayRecords = [], pesticide = null) {
+  const pidMatch = (v) => v != null && v !== '' &&
+    (String(v) === String(pesticideId) || (pesticide && pesticide.legacy_id != null && String(v) === String(pesticide.legacy_id)))
   const dailyCount = records.filter(
-    r => r.field_id === Number(fieldId) && r.pesticide_id === pesticideId
+    r => String(r.field_id) === String(fieldId) && pidMatch(r.pesticide_id)
   ).length
   const lotCount = lotSprayRecords.filter(
-    r => r.field_id === Number(fieldId) && (r.pesticides || []).some(p => p.pesticide_id === pesticideId)
+    r => String(r.field_id) === String(fieldId) && (r.pesticides || []).some(p => pidMatch(p.pesticide_id))
   ).length
   return dailyCount + lotCount
 }
 function isPesticideOverLimit(records, fieldId, pesticide, lotSprayRecords = []) {
   if (!pesticide) return false
-  return countPesticideUse(records, fieldId, pesticide.id, lotSprayRecords) >= pesticide.max_times
+  return countPesticideUse(records, fieldId, pesticide.id, lotSprayRecords, pesticide) >= pesticide.max_times
 }
 
 // ②-2 収穫前日数アラート（ダッシュボード用）
@@ -161,11 +166,11 @@ function calcHarvestRisk(records, plans, pesticides, fields) {
     if (daysToHarvest < 0 || daysToHarvest > 60) return // 収穫済み or 60日超先は対象外
 
     const sprayRecords = records
-      .filter(r => r.field_id === plan.field_id && r.work_type === '農薬散布' && r.pesticide_id)
+      .filter(r => String(r.field_id) === String(plan.field_id) && r.work_type === '農薬散布' && r.pesticide_id)
       .sort((a, b) => b.date.localeCompare(a.date))
 
     sprayRecords.forEach(sr => {
-      const pest = pesticides.find(p => p.id === sr.pesticide_id)
+      const pest = masterById(pesticides, sr.pesticide_id)
       if (!pest) return
       const sprayDate = new Date(sr.date)
       const daysSinceSpray = Math.ceil((today - sprayDate) / 86400000)
@@ -178,7 +183,7 @@ function calcHarvestRisk(records, plans, pesticides, fields) {
         harvestableDate.setDate(harvestableDate.getDate() + pest.preharvest_days)
         alerts.push({
           id: plan.id + '-' + sr.id,
-          fieldName: fields.find(f => f.id === plan.field_id)?.name ?? '不明',
+          fieldName: (masterById(fields, plan.field_id) || {}).name ?? '不明',
           cropName: plan.crop,
           pesticideName: pest.name,
           daysToHarvest,
@@ -227,7 +232,7 @@ function calcLotHarvestRisk(fieldRecords, lots, pesticides, lotSprayRecords) {
       const sorted = [...matchedLotSprays].sort((a, b) => b.date.localeCompare(a.date))
       sorted.forEach(rec => {
         ;(rec.pesticides || []).forEach(item => {
-          const pest = pesticides.find(p => p.id === item.pesticide_id)
+          const pest = masterById(pesticides, item.pesticide_id)
           if (!pest) return
           const sprayDate      = new Date(rec.date)
           const daysSinceSpray = Math.ceil((today - sprayDate) / 86400000)
@@ -258,7 +263,7 @@ function calcLotHarvestRisk(fieldRecords, lots, pesticides, lotSprayRecords) {
         .sort((a, b) => b.date.localeCompare(a.date))
 
       sprayRecords.forEach(sr => {
-        const pest = pesticides.find(p => p.id === sr.pesticide_id)
+        const pest = masterById(pesticides, sr.pesticide_id)
         if (!pest) return
         const sprayDate      = new Date(sr.date)
         const daysSinceSpray = Math.ceil((today - sprayDate) / 86400000)
@@ -320,7 +325,7 @@ function hasDateConflict(rentals, equipment, date) {
 }
 function hasCropOverlap(plans, fieldId, startMonth, endMonth) {
   return plans.some(p =>
-    p.field_id === Number(fieldId) &&
+    String(p.field_id) === String(fieldId) &&
     !(endMonth < p.start_month || startMonth > p.end_month)
   )
 }
@@ -362,8 +367,8 @@ function buildSprayTableHTML(sprayRecords, fields, pesticides) {
   const rows  = flatRows.length === 0
     ? '<tr><td colspan="12" style="text-align:center;color:#888;padding:20px;font-size:11px">農薬散布記録がありません</td></tr>'
     : flatRows.map((r, i) => {
-        const field = fields.find(f => f.id === r.field_id)
-        const pest  = pesticides.find(p => p.id === r.pesticide_id)
+        const field = masterById(fields, r.field_id)
+        const pest  = masterById(pesticides, r.pesticide_id)
         const disposal = Number(r.disposal_amount) || 0
         return `<tr>
           <td>${i + 1}</td>
@@ -571,7 +576,7 @@ async function exportFertilizerExcel(records, fields, skipConfirm) {
   if (!skipConfirm && !(await confirmDownload({ icon:'📊', title:'施肥記録をExcel出力', desc:'施肥の記録 ' + fertRecords.length + '件 をExcel(.xlsx)で出力します。', filename:'施肥記録簿_農場名.xlsx' }))) return
 
   const data = fertRecords.map(r => {
-    const field = fields.find(f => f.id === r.field_id)
+    const field = masterById(fields, r.field_id)
     return {
       '日付':       r.date,
       '圃場名':     field ? field.name : '—',
@@ -634,8 +639,8 @@ async function exportEmaffCSV(records, fields, pesticides, skipConfirm) {
     '作業者', '天気', '備考',
   ]
 
-  const findField = (id) => (fields || []).find(f => f.id === id) || {}
-  const findPest  = (id) => (pesticides || []).find(p => p.id === id) || null
+  const findField = (id) => masterById(fields, id) || {}
+  const findPest  = (id) => masterById(pesticides, id)
 
   const lines = [header.map(csvCell).join(',')]
 
