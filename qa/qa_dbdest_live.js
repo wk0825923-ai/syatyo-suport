@@ -117,6 +117,19 @@ const login = async (page) => {
     })
     ok('C4: 整備記録CRUDの本番往復(create→update→版ズレconflict→remove)',
       mRes.c && mRes.found && mRes.u && mRes.conflict && mRes.d && mRes.gone, JSON.stringify(mRes))
+
+    const sRes = await A.evaluate(async () => {
+      const col = 'farm_shipment_records', fid = CONFIG.CURRENT_FARM_ID, k = col + '_' + fid
+      const id = (crypto.randomUUID ? crypto.randomUUID() : 'qa-' + Date.now())
+      const c = await farmRepo.create(col, fid, { id, date: '2026-07-12', variety: 'QA検証品目(自動削除)', harvest_date: '2026-07-10', lot_code: 'QA-LOT', dest: 'QA', cases: 1, note: '' })
+      const r1 = await farmRepo.readAsync(k)
+      const rec = r1.ok ? r1.value.find(x => String(x.id) === id) : null
+      const d = await farmRepo.remove(col, fid, id, 1)
+      const r2 = await farmRepo.readAsync(k)
+      const gone = r2.ok && !r2.value.some(x => String(x.id) === id)
+      return { c: c.ok, found: !!rec, types: rec ? (rec.cases === 1 && rec.harvest_date === '2026-07-10') : false, d: d.ok, gone }
+    })
+    ok('C5: 出荷記録CRUDの本番往復(型保持含む)', sRes.c && sRes.found && sRes.types && sRes.d && sRes.gone, JSON.stringify(sRes))
   } finally {
     // 途中で例外終了してもテスト行を残さない（成功時は各検査内で消えているので実質no-op）
     try {
@@ -143,6 +156,13 @@ const login = async (page) => {
           if (m && m.ok && Array.isArray(m.value)) {
             for (const rec of m.value.filter(x => x.machine_name === 'QA検証機(自動削除)')) {
               await farmRepo.remove('farm_maintenance_records', CONFIG.CURRENT_FARM_ID, rec.id) // 版指定なし=無条件削除
+            }
+          }
+          const sk = 'farm_shipment_records_' + CONFIG.CURRENT_FARM_ID
+          const s = await farmRepo.readAsync(sk)
+          if (s && s.ok && Array.isArray(s.value)) {
+            for (const rec of s.value.filter(x => x.variety === 'QA検証品目(自動削除)')) {
+              await farmRepo.remove('farm_shipment_records', CONFIG.CURRENT_FARM_ID, rec.id)
             }
           }
         }, key)

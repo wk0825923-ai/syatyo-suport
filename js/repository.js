@@ -154,6 +154,29 @@
       },
       fromRows(rows) { return (rows || []).map(r => this.fromRow(r)) },
     },
+    // 出荷記録(記録系CRUD第2弾): 参照なし・アプリ形とDB列が1:1。整備記録と同じ1行単位CRUD型
+    farm_shipment_records: {
+      recordCrud: true,
+      toRow(rec, ctx) {
+        const d = (v) => /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(0, 10) : null
+        return {
+          id: String(rec.id), org_id: ctx.orgId, farm_id: ctx.farmId,
+          date: d(rec.date), harvest_date: d(rec.harvest_date),
+          variety: String(rec.variety == null ? '' : rec.variety),
+          lot_code: String(rec.lot_code == null ? '' : rec.lot_code),
+          dest: String(rec.dest == null ? '' : rec.dest),
+          cases: Number(rec.cases) || 0,
+          note: String(rec.note == null ? '' : rec.note),
+          version: Number.isFinite(Number(rec.version)) ? Math.trunc(Number(rec.version)) : 1,
+          legacy_id: (typeof rec.legacy_id === 'number') ? rec.legacy_id : null,
+        }
+      },
+      fromRow(r) {
+        return { id: r.id, date: r.date, harvest_date: r.harvest_date || '', variety: r.variety || '',
+          lot_code: r.lot_code || '', dest: r.dest || '', cases: Number(r.cases) || 0, note: r.note || '', version: r.version || 1 }
+      },
+      fromRows(rows) { return (rows || []).map(r => this.fromRow(r)) },
+    },
     // 月別平均気温: アプリ形 [12ヶ月の数値] ⇔ DB1行(farm_idで一意・temps jsonb)。1農場1行のsingleton型
     farm_monthly_temps: {
       conflict: 'farm_id',
@@ -420,7 +443,7 @@
   //   ?dbdest=1 で退避を解除。node(QAハーネス)ではrouteしない=テストが自分で管理する。
   //   localhost(ブラウザQAハーネス環境)は既定OFF: 約45本のハーネスがlocalStorage直注入の従来挙動を
   //   前提にしているため。localhostでDB経路を試す時だけ ?dbdest=1 を付ける。DB経路の検証はqa_dbdest_live担当。
-  const ROUTED_COLLECTIONS = ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records']
+  const ROUTED_COLLECTIONS = ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records', 'farm_shipment_records']
   try {
     if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
       const q = new URLSearchParams(window.location.search).get('dbdest')

@@ -225,7 +225,8 @@
     // 出荷
     arrOf(get('farm_shipment_records')).forEach(r => {
       put('farm_shipment_records', [Object.assign(base(), {
-        id: uuid(), date: D(r.date), variety: S(r.variety), harvest_date: D(r.harvest_date),
+        id: uuid(), legacy_id: (typeof r.id === 'number' ? r.id : null), version: 1,
+        date: D(r.date), variety: S(r.variety), harvest_date: D(r.harvest_date),
         lot_code: S(r.lot_code), dest: S(r.dest), cases: N(r.cases), note: S(r.note),
       })])
     })

@@ -16660,7 +16660,8 @@ function ShipmentLogPage({ shipmentRecords, harvestRecords, fields, destinations
   const valid = form.variety && form.dest && Number(form.cases) > 0
   const submit = () => {
     if (!valid) { showToast('品目・出荷先・数量を入力してください', 'warn'); return }
-    onSave({ ...form, id: Date.now(), cases: Number(form.cases), note: form.note.trim() })
+    // idは付けない: useRecordCollection側がUUIDを発行する
+    onSave({ ...form, cases: Number(form.cases), note: form.note.trim() })
     setForm({ ...blank, variety: form.variety, dest: form.dest })
   }
   const rows = [...(shipmentRecords || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)))

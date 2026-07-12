@@ -332,6 +332,23 @@ const KEY = 'farm_shipment_destinations_' + FARM
     String(w29.error && w29.error.message))
   farmRepo.unroute('farm_maintenance_records')
 
+  // 30) 出荷記録(記録系CRUD第2弾): 往復＋数値/日付の型保持＋version更新＋削除
+  farmRepo.route('farm_shipment_records', SR)
+  const SC = 'farm_shipment_records'
+  const SREC = { id: 'bbbb2222-0000-0000-0000-000000000001', date: '2026-07-12', variety: 'シスコ', harvest_date: '2026-07-10', lot_code: '(45)07100106', dest: 'JA木更津', cases: 12, note: '' }
+  const c30 = await farmRepo.create(SC, FARM, SREC)
+  const r30 = await farmRepo.readAsync(SC + '_' + FARM)
+  const got30 = r30.value.find(x => x.id === SREC.id)
+  const u30 = await farmRepo.update(SC, FARM, SREC.id, { cases: 15 }, 1)
+  const r30b = await farmRepo.readAsync(SC + '_' + FARM)
+  const d30 = await farmRepo.remove(SC, FARM, SREC.id, 2)
+  ok('R30 出荷記録CRUD: 往復(cases数値/lot_code/日付保持)＋version更新＋削除',
+    c30.ok && got30 && got30.cases === 12 && got30.lot_code === '(45)07100106' && got30.harvest_date === '2026-07-10' &&
+    u30.ok && r30b.value[0].cases === 15 && r30b.value[0].version === 2 && d30.ok &&
+    global.sb._tables[SC].filter(r => r.farm_id === FARM).length === 0,
+    JSON.stringify({ got: got30, after: r30b.value[0] }))
+  farmRepo.unroute('farm_shipment_records')
+
   const pass = checks.filter(c => c.pass).length
   const summary = { pass, total: checks.length, failed: checks.filter(c => !c.pass) }
   console.log('QAREPO_BEGIN'); console.log(JSON.stringify(summary, null, 1)); console.log('QAREPO_END')
