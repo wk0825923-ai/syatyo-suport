@@ -4902,7 +4902,7 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
     )
     let el
     if (kind === 'spray')     el = React.createElement(LotSprayRecordForm,    { field:selField, pesticides:pesticides||[], lots, staff, defaultWeather:suggestedWeather, pastSprays:lotSprayRecords||[], onCancel:backToStep2, onSave: async (r)=>{ const res = await Promise.resolve(onSaveLotSpray(r)).catch(()=>null); if (!(res && res.ok === true)) return res; clearDraft(); setDraftSaved(false); backToStep2(); return res } })
-    else if (kind === 'fert') el = React.createElement(TopDressingRecordForm, { field:selField, fertilizers:fertilizers||[], lots, staff, onCancel:backToStep2, onSave:(r)=>{ onSaveTopDressing(r); clearDraft(); setDraftSaved(false); backToStep2() } })
+    else if (kind === 'fert') el = React.createElement(TopDressingRecordForm, { field:selField, fertilizers:fertilizers||[], lots, staff, onCancel:backToStep2, onSave: async (r)=>{ const res = await Promise.resolve(onSaveTopDressing(r)).catch(()=>null); if (!(res && res.ok === true)) return res; clearDraft(); setDraftSaved(false); backToStep2(); return res } })
     else                      el = React.createElement(HarvestRecordForm,     { field:selField, lots, destinations:destinations||[], harvestRecords:harvestRecords||[], staff, onCancel:backToStep2, onSave:(r)=>{ onSaveHarvest(r); clearDraft(); setDraftSaved(false) } })
     return React.createElement('div', null, header, el)
   }
@@ -6789,12 +6789,11 @@ function TopDressingRecordForm({ field, fertilizers, lots, onSave, onCancel, sta
   const removeItem = (idx) => setItems(prev => prev.filter((_, i) => i !== idx))
 
   const handleFertilizerChange = (idx, id) => {
-    const fid = Number(id)
-    const fert = masterById(fertilizers, fid)
+    const fert = masterById(fertilizers, id) // UUID対応: Number()はNaN化するため禁止(masterByで両ID解決)
     // 【肥料 希釈倍率 案③】肥料マスタに登録があれば、品目(作物)に応じた倍率を自動セット（編集は常に可能）
     const suggested = getSuggestedFertilizerDilution(fert, item)
     updateItem(idx, {
-      fertilizer_id: fid,
+      fertilizer_id: id, // UUIDはそのまま保持(NaN化させない)
       dilution: suggested != null ? String(suggested) : '',
     })
   }
@@ -6805,12 +6804,17 @@ function TopDressingRecordForm({ field, fertilizers, lots, onSave, onCancel, sta
     items.length > 0 && items.every(it => it.fertilizer_id && (Number(it.dilution) > 0 || Number(it.amount_kg) > 0))
 
   const submittingRef = React.useRef(false)
-  const handleSubmit = () => {
+  // 送信ID保持: 成功(ok===true)確定まで同じIDを使い回す(応答喪失→再送でもRPC冪等で二重登録しない)
+  const submitIdRef = React.useRef(null)
+  const handleSubmit = async () => {
     if (!valid) { showToast('日付・畝範囲・肥料と量（希釈倍率かkg）を入力してください', 'warn'); return }
     if (submittingRef.current) return   // 連打による二重登録を防止
     submittingRef.current = true
     setTimeout(() => { submittingRef.current = false }, 1200)
-    onSave({
+    if (!submitIdRef.current) submitIdRef.current = newUuid()
+    // 祝福(紙吹雪)は保存側(app.js)がRPC/保存成功をawaitした後に出す。失敗時はフォームを保持する
+    const res = await Promise.resolve(onSave({
+      id: submitIdRef.current,
       field_id: field.id,
       date,
       fertilizing_type: fertilizingType,
@@ -6826,8 +6830,10 @@ function TopDressingRecordForm({ field, fertilizers, lots, onSave, onCancel, sta
       note: note.trim(),
       checks,
       staff_ids: staffIds,
-    })
-    celebrateSave('肥料散布を記録！')
+    })).catch(() => null)
+    // 成功はok===trueのみ(null/例外/不明応答は失敗扱い=入力と送信IDを保持し、再送は同じIDで冪等)
+    if (!(res && res.ok === true)) { submittingRef.current = false; return }
+    submitIdRef.current = null // 成功が確定: 次の記録は新しいIDで
   }
 
   return React.createElement('div', null,
@@ -7256,7 +7262,7 @@ function TopDressingRecordSection({ field, topDressingRecords, fertilizers, onSa
         ),
         React.createElement(TopDressingRecordForm, {
           field, fertilizers, lots,
-          onSave: r => { onSave(r); setShowAddModal(false) },
+          onSave: async r => { const res = await Promise.resolve(onSave(r)).catch(() => null); if (res && res.ok === true) setShowAddModal(false); return res }, // 成功時だけ閉じる(失敗は入力保持)
           onCancel: () => setShowAddModal(false),
           staff
         })

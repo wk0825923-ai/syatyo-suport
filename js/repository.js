@@ -365,6 +365,47 @@
       },
       fromRows(rows) { return (rows || []).map(r => this.fromRow(r)) },
     },
+    // 施肥記録(在庫連動記録の切替第2弾): 畝ロット散布と同型のrecordCrud+stockRpc。
+    // 肥料は「散布量(kg)直接」か「希釈倍率×散布液量」のどちらか(実データ両パターン)。
+    // 期待量計算(RPC v6)はamount_kg優先→希釈。fertilizersのキーはアプリ形のまま渡す。
+    farm_top_dressing_records: {
+      recordCrud: true,
+      stockRpc: true,
+      toRow(rec, ctx) {
+        const isUuid = (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v))
+        return {
+          id: String(rec.id), org_id: ctx.orgId, farm_id: ctx.farmId,
+          field_id: isUuid(rec.field_id) ? String(rec.field_id) : null,
+          date: /^\d{4}-\d{2}-\d{2}/.test(String(rec.date)) ? String(rec.date).slice(0, 10) : null,
+          fertilizing_type: String(rec.fertilizing_type == null ? '' : rec.fertilizing_type),
+          item: String(rec.item == null ? '' : rec.item),
+          row_range: String(rec.row_range == null ? '' : rec.row_range),
+          row_count: Number.isFinite(Number(rec.row_count)) ? Number(rec.row_count) : null,
+          fertilizers: Array.isArray(rec.fertilizers) ? rec.fertilizers : [],
+          spray_volume_l: (rec.spray_volume_L == null || rec.spray_volume_L === '') ? null : Number(rec.spray_volume_L), // アプリ形は大文字L・DB列は小文字
+          note: String(rec.note == null ? '' : rec.note),
+          checks: (rec.checks && typeof rec.checks === 'object') ? rec.checks : {},
+          staff_ids: Array.isArray(rec.staff_ids) ? rec.staff_ids : [],
+          version: Number.isFinite(Number(rec.version)) ? Math.trunc(Number(rec.version)) : 1,
+          legacy_id: (typeof rec.legacy_id === 'number') ? rec.legacy_id : null,
+        }
+      },
+      fromRow(r) {
+        const out = {
+          id: r.id, field_id: r.field_id, date: r.date,
+          fertilizing_type: r.fertilizing_type || '', item: r.item || '',
+          row_range: r.row_range || '', row_count: r.row_count != null ? Number(r.row_count) : 0,
+          fertilizers: Array.isArray(r.fertilizers) ? r.fertilizers : [],
+          spray_volume_L: r.spray_volume_l != null ? Number(r.spray_volume_l) : null,
+          note: r.note || '', checks: r.checks || {},
+          staff_ids: Array.isArray(r.staff_ids) ? r.staff_ids : [],
+          version: r.version || 1,
+        }
+        if (r.legacy_id != null) out.legacy_id = Number(r.legacy_id)
+        return out
+      },
+      fromRows(rows) { return (rows || []).map(r => this.fromRow(r)) },
+    },
     // 整備記録(記録系CRUDパイロット): 1行単位のcreate/update/remove専用。write()全置換は禁止。
     // 記録IDはクライアント発行のUUID。旧数値IDは移行時にlegacy_idへ。versionは楽観ロック用。
     farm_maintenance_records: {
@@ -752,7 +793,7 @@
   //   ?dbdest=1 で退避を解除。node(QAハーネス)ではrouteしない=テストが自分で管理する。
   //   localhost(ブラウザQAハーネス環境)は既定OFF: 約45本のハーネスがlocalStorage直注入の従来挙動を
   //   前提にしているため。localhostでDB経路を試す時だけ ?dbdest=1 を付ける。DB経路の検証はqa_dbdest_live担当。
-  const ROUTED_COLLECTIONS = ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records', 'farm_shipment_records', 'farm_pesticides', 'farm_fertilizers', 'farm_fields_v2', 'farm_lots', 'farm_lot_spray_records']
+  const ROUTED_COLLECTIONS = ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records', 'farm_shipment_records', 'farm_pesticides', 'farm_fertilizers', 'farm_fields_v2', 'farm_lots', 'farm_lot_spray_records', 'farm_top_dressing_records']
   try {
     if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
       const q = new URLSearchParams(window.location.search).get('dbdest')

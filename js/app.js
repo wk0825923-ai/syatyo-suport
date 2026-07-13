@@ -85,7 +85,9 @@
   const [fertilizers,         setFertilizers,     reloadFertilizers] = useFPS('farm_fertilizers',           INITIAL_FERTILIZERS)
   const [fertilizerStock,     setFertilizerStock]     = useFPS('farm_fertilizer_stock',      INITIAL_FERTILIZER_STOCK)
   const [fertilizerPurchases, setFertilizerPurchases] = useFPS('farm_fertilizer_purchases',  INITIAL_FERTILIZER_PURCHASES)
-  const [topDressingRecords,  setTopDressingRecords]  = useFPS('farm_top_dressing_records',  INITIAL_TOP_DRESSING_RECORDS)
+  // 【在庫連動記録の切替第2弾】施肥は1行単位CRUD+在庫RPC(routed時)。畝ロット散布と同型。
+  const topDressing = useRecordCollection('farm_top_dressing_records', farmKey, INITIAL_TOP_DRESSING_RECORDS)
+  const topDressingRecords = topDressing.list
 
 
   // ── 【フェーズE・E-4 Step4】ロット単位の農薬散布記録 state ──
@@ -504,34 +506,51 @@
   // 実データでは「希釈倍率÷散布液量」と「散布量(kg)直接入力」の両パターンが混在するため、
   // amount_kgが入力されている場合はそちらを優先して減算する分岐を追加する。
   // =====================================================
-  const onSaveTopDressingRecord = (record) => {
-    const entry = { ...record, id: Date.now() }
-    setTopDressingRecords(prev => [...prev, entry])
-    ;(entry.fertilizers || []).forEach(f => {
-      if (!f.fertilizer_id) return
-      if (Number(f.amount_kg) > 0) {
-        // 散布量(kg)が直接入力されている場合はそちらを優先
-        adjustFertilizerStock(f.fertilizer_id, Number(f.amount_kg))
-      } else if (Number(f.dilution) > 0 && Number(entry.spray_volume_L) > 0) {
-        // 希釈倍率×散布液量(L)から使用量(kg)を算出
-        const usedKg = Number(entry.spray_volume_L) / Number(f.dilution)
-        adjustFertilizerStock(f.fertilizer_id, usedKg)
-      }
+  // 施肥の在庫移動: 肥料ごとに amount_kg 優先→ 希釈×散布液量。RPC v6の期待量計算と同一式。
+  const topDressingStockRouted = () => !!(farmRepo.isStockRouted && farmRepo.isStockRouted('farm_top_dressing_records'))
+  const topDressingMovements = (record) => (record.fertilizers || [])
+    .map(f => {
+      if (!f.fertilizer_id) return null
+      let usedKg = null
+      if (Number(f.amount_kg) > 0) usedKg = Number(f.amount_kg)
+      else if (Number(f.dilution) > 0 && Number(record.spray_volume_L) > 0) usedKg = Number(record.spray_volume_L) / Number(f.dilution)
+      if (usedKg == null) return null
+      return { item_type: 'fertilizer', item_id: String(f.fertilizer_id), delta_amount: -usedKg, unit: 'kg', reason: '施肥' }
     })
+    .filter(Boolean)
+  const onSaveTopDressingRecord = async (record) => {
+    if (topDressingStockRouted()) {
+      const res = await topDressing.addWithStock(record, topDressingMovements(record))
+      if (res && res.ok) { celebrateSave('肥料散布を記録！'); reloadFertilizers() } // 残高即時反映(realtimeが保険)
+      return res
+    }
+    const res = await topDressing.add(record)
+    if (res && res.ok) {
+      ;(record.fertilizers || []).forEach(f => {
+        if (!f.fertilizer_id) return
+        if (Number(f.amount_kg) > 0) adjustFertilizerStock(f.fertilizer_id, Number(f.amount_kg))
+        else if (Number(f.dilution) > 0 && Number(record.spray_volume_L) > 0) adjustFertilizerStock(f.fertilizer_id, Number(record.spray_volume_L) / Number(f.dilution))
+      })
+      celebrateSave('肥料散布を記録！')
+    }
+    return res
   }
-  const onDeleteTopDressingRecord = (id) => {
-    const rec = topDressingRecords.find(x => x.id === id)
-    setTopDressingRecords(prev => prev.filter(x => x.id !== id))
-    if (!rec) return
-    ;(rec.fertilizers || []).forEach(f => {
-      if (!f.fertilizer_id) return
-      if (Number(f.amount_kg) > 0) {
-        adjustFertilizerStock(f.fertilizer_id, -Number(f.amount_kg))
-      } else if (Number(f.dilution) > 0 && Number(rec.spray_volume_L) > 0) {
-        const usedKg = Number(rec.spray_volume_L) / Number(f.dilution)
-        adjustFertilizerStock(f.fertilizer_id, -usedKg)
-      }
-    })
+  const onDeleteTopDressingRecord = async (id) => {
+    if (topDressingStockRouted()) {
+      const res = await topDressing.removeWithStock(id)
+      if (res && res.ok) reloadFertilizers()
+      return res
+    }
+    const rec = topDressingRecords.find(x => String(x.id) === String(id))
+    const res = await topDressing.removeById(id)
+    if (res && res.ok && rec) {
+      ;(rec.fertilizers || []).forEach(f => {
+        if (!f.fertilizer_id) return
+        if (Number(f.amount_kg) > 0) adjustFertilizerStock(f.fertilizer_id, -Number(f.amount_kg))
+        else if (Number(f.dilution) > 0 && Number(rec.spray_volume_L) > 0) adjustFertilizerStock(f.fertilizer_id, -(Number(rec.spray_volume_L) / Number(f.dilution)))
+      })
+    }
+    return res
   }
 
   const toggleTodayTask = id  => setTodayTasks(p => p.map(t => t.id===id ? {...t, done:!t.done} : t))

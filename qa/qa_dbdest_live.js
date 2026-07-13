@@ -313,6 +313,53 @@ const login = async (page) => {
     ok('C13: set同値(no-op)も冪等記録: 応答喪失→仕入れ+5L→同一ref_id再送はduplicate=23Lのまま巻き戻らない(記帳2行=0とその+5)',
       noRes.noop && noRes.a2 && noRes.dup && noRes.stock === 23 && noRes.rows === 2,
       JSON.stringify(noRes))
+
+    // ── 施肥=在庫RPC切替(アプリ契約): createWithStock→記録往復+肥料残高減算(amount_kg優先/希釈両方)→removeWithStockで完全復帰 ──
+    const tdRes = await A.evaluate(async () => {
+      const col = 'farm_top_dressing_records', fid = CONFIG.CURRENT_FARM_ID
+      const fk = 'farm_fertilizers_' + fid, sk = col + '_' + fid
+      const farmRow = await sb.from('farm_farms').select('org_id').eq('id', fid).limit(1)
+      const orgId = farmRow.data[0].org_id
+      // QA肥料2種(在庫40kg)。f1=amount_kg直接3kg / f2=希釈500×散布液量1000L=2kg
+      const f1 = crypto.randomUUID(), f2 = crypto.randomUUID()
+      await sb.from('farm_fertilizers').insert([
+        { id: f1, org_id: orgId, farm_id: fid, name: 'QA-TD肥料A(自動削除)', maker: 'QA', weight_per_bag_kg: 20, price_per_bag_yen: 3000, unit_price_yen_per_kg: 150, stock_kg: 40 },
+        { id: f2, org_id: orgId, farm_id: fid, name: 'QA-TD肥料B(自動削除)', maker: 'QA', weight_per_bag_kg: 20, price_per_bag_yen: 3000, unit_price_yen_per_kg: 150, stock_kg: 40 },
+      ])
+      const rec = { id: crypto.randomUUID(), field_id: null, date: '2026-07-14',
+        fertilizing_type: '追肥', item: 'レタス', row_range: '1-3', row_count: 3,
+        fertilizers: [
+          { fertilizer_id: f1, dilution: null, amount_kg: 3 },       // 直接3kg → 40→37
+          { fertilizer_id: f2, dilution: 500, amount_kg: null },     // 1000L/500=2kg → 40→38
+        ], spray_volume_L: 1000, note: 'QA-TD(自動削除)', checks: { tenki: true }, staff_ids: [] }
+      const mov = [
+        { item_type: 'fertilizer', item_id: f1, delta_amount: -3, unit: 'kg', reason: '施肥' },
+        { item_type: 'fertilizer', item_id: f2, delta_amount: -2, unit: 'kg', reason: '施肥' },
+      ]
+      const c = await farmRepo.createWithStock(col, fid, rec, mov)
+      const r1 = await farmRepo.readAsync(sk)
+      const got = r1.ok ? r1.value.find(x => String(x.id) === rec.id) : null
+      const m1 = await farmRepo.readAsync(fk)
+      const a1 = m1.ok ? m1.value.find(x => String(x.id) === f1) : null
+      const b1 = m1.ok ? m1.value.find(x => String(x.id) === f2) : null
+      const d = await farmRepo.removeWithStock(col, fid, rec.id, 1)
+      const m2 = await farmRepo.readAsync(fk)
+      const a2 = m2.ok ? m2.value.find(x => String(x.id) === f1) : null
+      const b2 = m2.ok ? m2.value.find(x => String(x.id) === f2) : null
+      // 片付け
+      await sb.from('farm_stock_movements').delete().eq('item_id', f1)
+      await sb.from('farm_stock_movements').delete().eq('item_id', f2)
+      await sb.from('farm_fertilizers').delete().eq('id', f1)
+      await sb.from('farm_fertilizers').delete().eq('id', f2)
+      return { c: !!(c && c.ok), found: !!got, ftype: got && got.fertilizing_type === '追肥',
+        checks: got && got.checks && got.checks.tenki === true, vol: got && got.spray_volume_L === 1000,
+        stockA: a1 && a1.stock_kg, stockB: b1 && b1.stock_kg,
+        d: !!(d && d.ok), stockAafter: a2 && a2.stock_kg, stockBafter: b2 && b2.stock_kg }
+    })
+    ok('C14: 施肥の在庫RPC往復(createWithStock=記録+肥料A40→37kg(直接)/B40→38kg(希釈)・converter往復(区分/checks/液量)・removeWithStockで40kg復帰)',
+      tdRes.c && tdRes.found && tdRes.ftype && tdRes.checks && tdRes.vol &&
+      tdRes.stockA === 37 && tdRes.stockB === 38 && tdRes.d && tdRes.stockAafter === 40 && tdRes.stockBafter === 40,
+      JSON.stringify(tdRes))
   } finally {
     // 途中で例外終了してもテスト行を残さない（成功時は各検査内で消えているので実質no-op）
     try {
