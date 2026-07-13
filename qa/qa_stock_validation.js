@@ -29,6 +29,9 @@ ok('V4 数値でない文字列(NaN)は拒否', isValidStockAmount('abc') === fa
 ok('V5 負数は拒否(棚卸し値としてありえない)', isValidStockAmount('-1') === false && isValidStockAmount(-0.5) === false)
 ok('V6 Infinity/-Infinityは拒否', isValidStockAmount(Infinity) === false && isValidStockAmount(-Infinity) === false)
 ok('V7 NaN(数値型)は拒否', isValidStockAmount(NaN) === false)
+ok('V8 boolean型は拒否(Number(true)=1で通ってしまう化けを型で防ぐ)', isValidStockAmount(true) === false && isValidStockAmount(false) === false)
+ok('V9 配列/オブジェクトは拒否(Number([])=0・Number([5])=5の化けを型で防ぐ)',
+  isValidStockAmount([]) === false && isValidStockAmount([5]) === false && isValidStockAmount({}) === false)
 
 // ── 受理すべき入力(在庫として確定してよい) ──
 ok('A1 0は有効(在庫を0にする棚卸しは正当。空文字とは区別)', isValidStockAmount('0') === true && isValidStockAmount(0) === true)

@@ -30,7 +30,9 @@ function newUuid() {
 // なるため必ず弾く。NaN・非有限・負数も在庫数としてありえない。UI(農薬/肥料棚卸し)とapp層の
 // 二重防御で共用する(片方だけ直すと抜けるため単一の判定に集約)。
 function isValidStockAmount(v) {
-  if (v == null) return false
+  // 数値/文字列以外(boolean/配列/オブジェクト等)は在庫入力ではありえない。
+  // Number(true)=1・Number([])=0 のように化けて通るため、型を先に限定する。
+  if (typeof v !== 'string' && typeof v !== 'number') return false
   if (typeof v === 'string' && v.trim() === '') return false // 空文字・空白のみはNumber()=0で通るため弾く
   const n = Number(v)
   return Number.isFinite(n) && n >= 0

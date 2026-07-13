@@ -12,5 +12,6 @@ Thumbs.db
 *.log
 qa/*.json
 !qa/package.json
+qa/out_*.txt
 
 機能棚卸.html
