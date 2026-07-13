@@ -26,6 +26,16 @@ function newUuid() {
   })
 }
 
+// 棚卸し等で「在庫量」として確定してよい入力か。空文字はNumber('')=0で通って在庫全消しに
+// なるため必ず弾く。NaN・非有限・負数も在庫数としてありえない。UI(農薬/肥料棚卸し)とapp層の
+// 二重防御で共用する(片方だけ直すと抜けるため単一の判定に集約)。
+function isValidStockAmount(v) {
+  if (v == null) return false
+  if (typeof v === 'string' && v.trim() === '') return false // 空文字・空白のみはNumber()=0で通るため弾く
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0
+}
+
 // PDF/印刷用HTMLに差し込むユーザー入力(圃場名/作業者名/品種/備考など)のエスケープ。
 // これらは el.innerHTML や window.open+document.write に渡すため、<img onerror=...> 等が
 // そのまま実行される。テンプレートリテラルに埋める前に必ず通す。

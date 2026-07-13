@@ -404,8 +404,8 @@
   // 棚卸し: 在庫量を直接更新。refId=フォームが保持する冪等キー(応答喪失→再送でも巻き戻さない)。{ok}を返しUIが成否判定する
   const onUpdateStock = async (pesticideId, newStockL, refId) => {
     // 空欄/不正値は0扱いにせず拒否(||0だと入力消しで在庫全消しになる。UIでも弾くが層でも防御)
+    if (!isValidStockAmount(newStockL)) return { ok: false, invalid: true }
     const amount = Number(newStockL)
-    if (!Number.isFinite(amount) || amount < 0) return { ok: false, invalid: true }
     if (masterStockDb('farm_pesticides')) {
       const res = await adjustStockDbRetry('pesticide', pesticideId, 'set', amount, '棚卸し調整', refId || newUuid())
       if (res && res.ok) { reloadPesticides(); return { ok: true } }
@@ -472,8 +472,8 @@
 
   // 肥料棚卸し: 在庫量を直接更新（onUpdateStockと同パターン）
   const onUpdateFertilizerStock = async (fertilizerId, newStockKg, refId) => {
+    if (!isValidStockAmount(newStockKg)) return { ok: false, invalid: true } // 空欄/不正は拒否(||0廃止・空文字も弾く)
     const amount = Number(newStockKg)
-    if (!Number.isFinite(amount) || amount < 0) return { ok: false, invalid: true } // 空欄/不正は拒否(||0廃止)
     if (masterStockDb('farm_fertilizers')) {
       const res = await adjustStockDbRetry('fertilizer', fertilizerId, 'set', amount, '棚卸し調整', refId || newUuid())
       if (res && res.ok) { reloadFertilizers(); return { ok: true } }

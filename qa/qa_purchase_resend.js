@@ -48,7 +48,8 @@ const patchAdjust = (page, mode)=>page.evaluate((mode)=>{
   const b=await puppeteer.launch({executablePath:CHROME,headless:'new',args:['--no-sandbox','--disable-dev-shm-usage'],protocolTimeout:240000})
   const page=await b.newPage(); await page.setViewport({width:1500,height:1000})
   page.on('pageerror',e=>errors.push(phase+':'+String(e.message||e).slice(0,120)))
-  let pid=null, initPid=null
+  let pid=null, initPid=null, fertId=null
+  const FNAME='QA棚卸し肥料(自動削除)'
   try{
     await page.goto(`http://localhost:${PORT}/?dbdest=1`,{waitUntil:'networkidle2',timeout:60000})
     if(!(await page.evaluate(()=>!!document.querySelector('.main')))){
@@ -298,6 +299,50 @@ const patchAdjust = (page, mode)=>page.evaluate((mode)=>{
       r8.rpcCalls===0 && r8.stock===75 && r8.errShown===true && r8.savedShown===false,
       JSON.stringify(r8))
 
+    // ═══ R9: 肥料棚卸しの負数は無言拒否せず行エラー(レビュー20 Medium・肥料側にも農薬と同じ検証) ═══
+    phase='r9-fert-negative'
+    fertId=await page.evaluate(async (name)=>{
+      const fid=CONFIG.CURRENT_FARM_ID
+      const f=await sb.from('farm_farms').select('org_id').eq('id',fid).limit(1)
+      const id=crypto.randomUUID()
+      const r=await sb.from('farm_fertilizers').insert([{id,org_id:f.data[0].org_id,farm_id:fid,name,maker:'QA',weight_per_bag_kg:20,price_per_bag_yen:3000,unit_price_yen_per_kg:150,stock_kg:40}])
+      return r.error?null:id
+    },FNAME)
+    if(!fertId)throw new Error('fertilizer seed failed (R9)')
+    await page.goto(`http://localhost:${PORT}/?dbdest=1`,{waitUntil:'networkidle2',timeout:60000}); await sleep(1500)
+    await navClick(page,'マスタ管理'); await sleep(800)
+    await clickText(page,'肥料マスタ'); await sleep(700)
+    await patchAdjust(page,'restore') // reloadでパッチが消えるため貼り直す
+    await clickText(page,'棚卸し入力'); await sleep(700)
+    // 肥料行の入力欄に-1を実キーボードで打つ(農薬と同じ番号入力)
+    const fertHandle=await page.evaluateHandle((name)=>{
+      const cards=[...document.querySelectorAll('.main div')].filter(e=>e.offsetParent&&e.textContent.includes(name)&&e.querySelector('input[type=number]'))
+      const card=cards[cards.length-1]; return card?card.querySelector('input[type=number]'):null
+    },FNAME)
+    if(!(await fertHandle.evaluate(el=>!!el)))throw new Error('fertilizer inventory input not found (R9)')
+    await fertHandle.click({clickCount:3})
+    await page.keyboard.type('-1')
+    await sleep(300)
+    const callsBefore9=await page.evaluate(()=>(window.__adjCalls||[]).length)
+    // 「反映」ボタン(この肥料カード内)を押す
+    for(let i=0;i<20;i++){ const c=await page.evaluate((name)=>{
+      const cards=[...document.querySelectorAll('.main div')].filter(e=>e.offsetParent&&e.textContent.includes(name)&&e.querySelector('input[type=number]'))
+      const card=cards[cards.length-1]; if(!card)return false
+      const btn=[...card.querySelectorAll('button')].find(b=>/反映/.test(b.textContent)&&!b.disabled)
+      if(btn){btn.click();return true}return false
+    },FNAME); if(c)break; await sleep(200) }
+    await sleep(1200)
+    const r9=await page.evaluate(async ({fertId,name,callsBefore9})=>{
+      const st=await sb.from('farm_fertilizers').select('stock_kg').eq('id',fertId)
+      const cards=[...document.querySelectorAll('.main div')].filter(e=>e.offsetParent&&e.textContent.includes(name)&&e.querySelector('input[type=number]'))
+      const card=cards[cards.length-1]
+      return { stock:Number(st.data[0].stock_kg),
+        rpcCalls:(window.__adjCalls||[]).length-callsBefore9,
+        errShown: card ? /0以上の在庫量を入力してください/.test(card.textContent) : false }
+    },{fertId,name:FNAME,callsBefore9})
+    ok('R9 肥料棚卸しの負数: 無言拒否せず「0以上の在庫量を入力してください」表示・RPC0件・DB在庫40kgのまま',
+      r9.errShown===true && r9.rpcCalls===0 && r9.stock===40, JSON.stringify(r9))
+
     initPid=await page.evaluate(async (name)=>{ // R3で作られたマスタ行(DB同期後)のidを後片付け用に取得
       for(let i=0;i<10;i++){
         const r=await sb.from('farm_pesticides').select('id').eq('farm_id',CONFIG.CURRENT_FARM_ID).eq('name',name)
@@ -313,7 +358,8 @@ const patchAdjust = (page, mode)=>page.evaluate((mode)=>{
         // 削除はテストが作った資材のIDに限定する(正規の冪等マーカーを消すと巻き戻し防止が壊れる)
         if(pid){ await sb.from('farm_stock_movements').delete().eq('item_id',pid); await sb.from('farm_pesticides').delete().eq('id',pid) }
         if(initPid){ await sb.from('farm_stock_movements').delete().eq('item_id',initPid); await sb.from('farm_pesticides').delete().eq('id',initPid) }
-      },{pid,initPid})
+        if(fertId){ await sb.from('farm_stock_movements').delete().eq('item_id',fertId); await sb.from('farm_fertilizers').delete().eq('id',fertId) }
+      },{pid,initPid,fertId})
     }catch(_){}
   }
   const pass=checks.filter(c=>c.pass).length
