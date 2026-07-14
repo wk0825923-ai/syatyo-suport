@@ -88,6 +88,12 @@ function makeRepo(opts) {
       return Promise.resolve(opts.updateWithStockResult || { ok: true })
     },
     removeWithStock(collection, farmId, id, ev) { calls.remove.push({ id, ev }); return Promise.resolve(opts.removeWithStockResult || { ok: true }) },
+    // 仕入れ登録(履歴+在庫を1トランザクション)。hookは楽観追加/upsert+失敗ロールバックを担う
+    addPurchaseWithStock(collection, farmId, purchase) {
+      calls.addPurchase = calls.addPurchase || []
+      calls.addPurchase.push(purchase)
+      return Promise.resolve(opts.addPurchaseResult || { ok: true })
+    },
     remove(collection, farmId, id, ev) {
       calls.remove.push({ id, ev })
       if (opts.deferRemove) return new Promise(r => removeResolvers.push(r))
@@ -346,6 +352,38 @@ const build = (repo, farmBox) => {
     ok('H17 既存ID保存失敗: 楽観置換した新内容を残さず更新前(旧内容)へ復元・件数不変＋トースト',
       !res.ok && rt.result.list.length === 1 && got && got.machine_name === '旧内容' && toasts.length === 1,
       JSON.stringify({ n: rt.result.list.length, name: got && got.machine_name, toasts: toasts.length }))
+  }
+
+  // H18: addPurchase 新規成功 — 楽観追加が残り、addPurchaseWithStockにpurchaseが渡る
+  {
+    const repo = makeRepo({ dbList: [] })
+    const { rt } = build(repo); await tick()
+    const res = await rt.result.addPurchase({ id: 'p-1', pesticide_id: 'A', amount_L: 5, supplier: 'QA商店' })
+    await tick()
+    ok('H18 addPurchase成功: 楽観追加が残り・RPCにpurchaseが渡る',
+      res.ok && rt.result.list.length === 1 && repo.calls.addPurchase && repo.calls.addPurchase[0].amount_L === 5,
+      JSON.stringify({ n: rt.result.list.length }))
+  }
+  // H19: addPurchase 新規失敗 — 楽観追加をロールバック(listから消える)＋トースト
+  {
+    const repo = makeRepo({ dbList: [], addPurchaseResult: { ok: false, error: new Error('offline') } })
+    const { rt, toasts } = build(repo); await tick()
+    const res = await rt.result.addPurchase({ id: 'p-2', pesticide_id: 'A', amount_L: 5 })
+    await tick()
+    ok('H19 addPurchase新規失敗: 楽観追加をロールバック・件数0・トースト',
+      !res.ok && rt.result.list.length === 0 && toasts.length === 1, JSON.stringify({ n: rt.result.list.length, toasts: toasts.length }))
+  }
+  // H20: addPurchase 既存ID失敗(異内容再送がRPC拒否) — 楽観置換した新内容を残さず更新前(初回)へ復元
+  {
+    const OLD = { id: 'p-3', pesticide_id: 'A', amount_L: 5, supplier: 'QA商店' }
+    const repo = makeRepo({ dbList: [OLD], addPurchaseResult: { ok: false, error: new Error('異内容') } })
+    const { rt, toasts } = build(repo); await tick()
+    const res = await rt.result.addPurchase({ id: 'p-3', pesticide_id: 'A', amount_L: 6, supplier: 'QA商店' }) // 6Lへ変えて再送
+    await tick()
+    const got = rt.result.list.find(x => x.id === 'p-3')
+    ok('H20 addPurchase既存ID失敗(異内容再送拒否): 楽観置換した6Lを残さず更新前(5L)へ復元・件数不変＋トースト',
+      !res.ok && rt.result.list.length === 1 && got && got.amount_L === 5 && toasts.length === 1,
+      JSON.stringify({ n: rt.result.list.length, amt: got && got.amount_L, toasts: toasts.length }))
   }
 
   const pass = checks.filter(c => c.pass).length
