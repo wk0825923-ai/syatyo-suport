@@ -6799,15 +6799,17 @@ function TopDressingRecordForm({ field, fertilizers, lots, onSave, onCancel, sta
   }
 
   // rowRange（テキスト）が最終的な保存値。マップ選択→自動変換 or 手動入力どちらでも同じstateに入る。
-  // 肥料の各行は「希釈倍率」か「散布量(kg)直接入力」のどちらか一方が入っていればOK（実データの両パターン対応）
+  // 肥料の各行は「散布量(kg)直接」か「希釈倍率×散布液量」で使用量を確定できること。
+  // 希釈方式は散布液量(L)が無いと使用量を計算できずRPCに拒否される→画面側でも同じ条件で弾く(保存失敗を未然に防ぐ)
   const valid = !!date && rowRange.trim() !== '' &&
-    items.length > 0 && items.every(it => it.fertilizer_id && (Number(it.dilution) > 0 || Number(it.amount_kg) > 0))
+    items.length > 0 && items.every(it => it.fertilizer_id &&
+      (Number(it.amount_kg) > 0 || (Number(it.dilution) > 0 && Number(sprayVolume) > 0)))
 
   const submittingRef = React.useRef(false)
   // 送信ID保持: 成功(ok===true)確定まで同じIDを使い回す(応答喪失→再送でもRPC冪等で二重登録しない)
   const submitIdRef = React.useRef(null)
   const handleSubmit = async () => {
-    if (!valid) { showToast('日付・畝範囲・肥料と量（希釈倍率かkg）を入力してください', 'warn'); return }
+    if (!valid) { showToast('日付・畝範囲・肥料と量を入力してください（希釈倍率で入れる場合は散布液量も必須）', 'warn'); return }
     if (submittingRef.current) return   // 連打による二重登録を防止
     submittingRef.current = true
     setTimeout(() => { submittingRef.current = false }, 1200)

@@ -32,6 +32,15 @@ const setInputByPh = (page, ph, v)=>page.evaluate(({ph,v})=>{
   const s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set
   s.call(el,String(v)); el.dispatchEvent(new Event('input',{bubbles:true})); return true
 },{ph,v})
+// 施肥フォームは希釈倍率(例:500)と散布量kg(例:5)のplaceholderが部分一致で衝突するため、見出しspan直近のinputを狙う
+const setByLabel = (page, labelText, v)=>page.evaluate(({labelText,v})=>{
+  const nodes=[...document.querySelectorAll('span,label')].filter(e=>e.offsetParent&&e.textContent.trim().startsWith(labelText))
+  for(const node of nodes){
+    const inp=node.parentElement&&node.parentElement.querySelector('input[type=number]')
+    if(inp){ const s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set; s.call(inp,String(v)); inp.dispatchEvent(new Event('input',{bubbles:true})); return true }
+  }
+  return false
+},{labelText,v})
 ;(async()=>{
   await new Promise(r=>server.listen(PORT,r))
   const checks=[]; const errors=[]; let phase='boot'
@@ -93,7 +102,7 @@ const setInputByPh = (page, ph, v)=>page.evaluate(({ph,v})=>{
   await sleep(300); await clickText(page,'次へ'); await sleep(500)
   await clickText(page,'施肥'); await sleep(400); await clickText(page,'次へ'); await sleep(900)
   await setInputByPh(page,'1-40','1-3')
-  await setInputByPh(page,'例: 5','20') // 施肥量(kg)
+  await setByLabel(page,'散布量','20') // 施肥量(kg)。placeholder衝突を避け見出し「散布量」の直近inputへ
   await sleep(300)
   await clickText(page,'記録する'); await sleep(1200)
   const e2=await page.evaluate((fid)=>{
