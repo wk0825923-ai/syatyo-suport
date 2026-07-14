@@ -404,6 +404,31 @@ const login = async (page) => {
       wrRes.c && wrRes.found && wrRes.cycle && wrRes.vol && wrRes.checks && wrRes.stA1 === 15 &&
       wrRes.u && wrRes.stA2 === 20 && wrRes.stB2 === 15 && wrRes.pidAfter && wrRes.d && wrRes.stB3 === 20,
       JSON.stringify(wrRes))
+
+    // ── 収穫記録(farm_harvest_records)=記録系CRUD第5弾(在庫非連動): create→converter往復(shipments jsonb/total_cases/checks)→版ズレconflict→remove ──
+    const hvRes = await A.evaluate(async () => {
+      const col = 'farm_harvest_records', fid = CONFIG.CURRENT_FARM_ID, k = col + '_' + fid
+      const id = crypto.randomUUID()
+      const rec = { id, field_id: null, date: '2026-07-14', variety: 'QA収穫品種(自動削除)', row_range: '1-3',
+        lot_code: 'QA-HV-1', shipments: [{ dest: 'JA', cases: 12 }, { dest: '直売', cases: 3 }], total_cases: 15,
+        worker: 'QA', note: 'QA収穫(自動削除)', checks: { kanri: true } }
+      const c = await farmRepo.create(col, fid, rec)
+      const r1 = await farmRepo.readAsync(k)
+      const got = r1.ok ? r1.value.find(x => String(x.id) === id) : null
+      const conflict = await farmRepo.remove(col, fid, id, 99) // 版ズレ=conflict(削除されない)
+      const still = await farmRepo.readAsync(k)
+      const stillThere = still.ok && still.value.some(x => String(x.id) === id)
+      const d = await farmRepo.remove(col, fid, id, (got && got.version) || 1)
+      const r2 = await farmRepo.readAsync(k)
+      const gone = r2.ok && !r2.value.some(x => String(x.id) === id)
+      return { c: !!(c && c.ok), found: !!got,
+        ship: got ? (Array.isArray(got.shipments) && got.shipments.length === 2 && got.shipments[0].cases === 12) : false,
+        total: got ? got.total_cases === 15 : false, checks: got ? (got.checks && got.checks.kanri === true) : false,
+        conflict: !!(conflict && conflict.conflict), stillThere, d: !!(d && d.ok), gone }
+    })
+    ok('C16: 収穫記録CRUDの本番往復(shipments jsonb/total_cases/checks往復・版ズレconflict保護・remove)',
+      hvRes.c && hvRes.found && hvRes.ship && hvRes.total && hvRes.checks && hvRes.conflict && hvRes.stillThere && hvRes.d && hvRes.gone,
+      JSON.stringify(hvRes))
   } finally {
     // 途中で例外終了してもテスト行を残さない（成功時は各検査内で消えているので実質no-op）
     try {

@@ -516,6 +516,41 @@
       },
       fromRows(rows) { return (rows || []).map(r => this.fromRow(r)) },
     },
+    // 収穫記録(記録系CRUD第5弾・在庫非連動): 出荷先別ケース数(shipments jsonb)を持つ。圃場マスタ(uuid)を参照。
+    // 圃場のDB切替後に対応する意図的な順序。整備/出荷と同じ1行単位CRUD。
+    farm_harvest_records: {
+      recordCrud: true,
+      toRow(rec, ctx) {
+        const isUuid = (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v))
+        return {
+          id: String(rec.id), org_id: ctx.orgId, farm_id: ctx.farmId,
+          field_id: isUuid(rec.field_id) ? String(rec.field_id) : null,
+          date: /^\d{4}-\d{2}-\d{2}/.test(String(rec.date)) ? String(rec.date).slice(0, 10) : null,
+          variety: String(rec.variety == null ? '' : rec.variety),
+          row_range: String(rec.row_range == null ? '' : rec.row_range),
+          lot_code: String(rec.lot_code == null ? '' : rec.lot_code),
+          shipments: Array.isArray(rec.shipments) ? rec.shipments : [],
+          total_cases: Number.isFinite(Number(rec.total_cases)) ? Math.trunc(Number(rec.total_cases)) : 0,
+          worker: String(rec.worker == null ? '' : rec.worker),
+          note: String(rec.note == null ? '' : rec.note),
+          checks: (rec.checks && typeof rec.checks === 'object') ? rec.checks : {},
+          version: Number.isFinite(Number(rec.version)) ? Math.trunc(Number(rec.version)) : 1,
+          legacy_id: (typeof rec.legacy_id === 'number') ? rec.legacy_id : null,
+        }
+      },
+      fromRow(r) {
+        const out = {
+          id: r.id, field_id: r.field_id, date: r.date, variety: r.variety || '',
+          row_range: r.row_range || '', lot_code: r.lot_code || '',
+          shipments: Array.isArray(r.shipments) ? r.shipments : [],
+          total_cases: Number(r.total_cases) || 0, worker: r.worker || '',
+          note: r.note || '', checks: r.checks || {}, version: r.version || 1,
+        }
+        if (r.legacy_id != null) out.legacy_id = Number(r.legacy_id)
+        return out
+      },
+      fromRows(rows) { return (rows || []).map(r => this.fromRow(r)) },
+    },
     // 月別平均気温: アプリ形 [12ヶ月の数値] ⇔ DB1行(farm_idで一意・temps jsonb)。1農場1行のsingleton型
     farm_monthly_temps: {
       conflict: 'farm_id',
@@ -856,7 +891,7 @@
   //   ?dbdest=1 で退避を解除。node(QAハーネス)ではrouteしない=テストが自分で管理する。
   //   localhost(ブラウザQAハーネス環境)は既定OFF: 約45本のハーネスがlocalStorage直注入の従来挙動を
   //   前提にしているため。localhostでDB経路を試す時だけ ?dbdest=1 を付ける。DB経路の検証はqa_dbdest_live担当。
-  const ROUTED_COLLECTIONS = ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records', 'farm_shipment_records', 'farm_pesticides', 'farm_fertilizers', 'farm_fields_v2', 'farm_lots', 'farm_lot_spray_records', 'farm_top_dressing_records', 'farm_records']
+  const ROUTED_COLLECTIONS = ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records', 'farm_shipment_records', 'farm_pesticides', 'farm_fertilizers', 'farm_fields_v2', 'farm_lots', 'farm_lot_spray_records', 'farm_top_dressing_records', 'farm_records', 'farm_harvest_records']
   try {
     if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
       const q = new URLSearchParams(window.location.search).get('dbdest')

@@ -182,7 +182,9 @@
   }
 
   // ── 【フェーズE・E-4 Step5】収穫記録（出荷先別ケース数）state ──
-  const [harvestRecords, setHarvestRecords] = useFPS('farm_harvest_records', INITIAL_HARVEST_RECORDS)
+  // 【記録系CRUD第5弾】収穫記録は1行単位CRUD(在庫非連動)。整備/出荷と同型。祝福はフォーム側。
+  const harvest = useRecordCollection('farm_harvest_records', farmKey, INITIAL_HARVEST_RECORDS)
+  const harvestRecords = harvest.list
 
   // ── 【実装手順書 Step2】出荷先マスタ state（SHIPMENT_DESTINATIONSを初期値にApp側で管理） ──
   const [shipmentDestinations, setShipmentDestinations] = useFPS('farm_shipment_destinations', SHIPMENT_DESTINATIONS)
@@ -340,12 +342,9 @@
   // 【フェーズE・E-4 Step5】収穫記録（出荷先別ケース数）保存・削除
   // E-3-4のHARVEST_RECORDS構造に対応。records（日報）とは独立したデータ。
   // =====================================================
-  const onSaveHarvestRecord = (record) => {
-    setHarvestRecords(prev => [...prev, { ...record, id: Date.now() }])
-  }
-  const onDeleteHarvestRecord = (id) => {
-    setHarvestRecords(prev => prev.filter(r => r.id !== id))
-  }
+  // 在庫非連動: add/removeById(hookが routed=DB / localStorage を吸収)。{ok}を返しフォームが成否判定
+  const onSaveHarvestRecord = async (record) => harvest.add(record)
+  const onDeleteHarvestRecord = async (id) => harvest.removeById(id)
 
   // 【在庫調整のDB経路化(レビュー13 High)】マスタがDB経路なら仕入れ/棚卸し/初期在庫も
   // farm_adjust_stock RPC(記帳+残高が1トランザクション・refId冪等)でDB残高へ反映する。

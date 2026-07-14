@@ -4915,7 +4915,7 @@ function RecordForm({ fields, pesticides, records, onSave, inModal, lotSprayReco
     let el
     if (kind === 'spray')     el = React.createElement(LotSprayRecordForm,    { field:selField, pesticides:pesticides||[], lots, staff, defaultWeather:suggestedWeather, pastSprays:lotSprayRecords||[], onCancel:backToStep2, onSave: async (r)=>{ const res = await Promise.resolve(onSaveLotSpray(r)).catch(()=>null); if (!(res && res.ok === true)) return res; clearDraft(); setDraftSaved(false); backToStep2(); return res } })
     else if (kind === 'fert') el = React.createElement(TopDressingRecordForm, { field:selField, fertilizers:fertilizers||[], lots, staff, onCancel:backToStep2, onSave: async (r)=>{ const res = await Promise.resolve(onSaveTopDressing(r)).catch(()=>null); if (!(res && res.ok === true)) return res; clearDraft(); setDraftSaved(false); backToStep2(); return res } })
-    else                      el = React.createElement(HarvestRecordForm,     { field:selField, lots, destinations:destinations||[], harvestRecords:harvestRecords||[], staff, onCancel:backToStep2, onSave:(r)=>{ onSaveHarvest(r); clearDraft(); setDraftSaved(false) } })
+    else                      el = React.createElement(HarvestRecordForm,     { field:selField, lots, destinations:destinations||[], harvestRecords:harvestRecords||[], staff, onCancel:backToStep2, onSave: async (r)=>{ const res = await Promise.resolve(onSaveHarvest(r)).catch(()=>null); if (res && res.ok === true) { clearDraft(); setDraftSaved(false) } return res } })
     return React.createElement('div', null, header, el)
   }
   const useRich = richMode && !!RICH_FORM[form.work_type] && !!selField && step >= 3
@@ -7489,13 +7489,16 @@ function HarvestRecordForm({ field, lots, destinations, harvestRecords, onSave, 
                     && shipments.length > 0 && shipments.some(r => Number(r.cases) > 0)
 
   const submittingRef = React.useRef(false)
-  const handleSave = () => {
+  // 送信ID保持: 成功(ok===true)確定まで同じIDを使い回す(応答喪失→再送でもDBは冪等で二重登録しない)
+  const submitIdRef = React.useRef(null)
+  const handleSave = async () => {
     if (!canSave) { showToast('日付・品種・畝範囲・出荷ケース数を入力してください', 'warn'); return }
     if (submittingRef.current) return   // 連打による二重登録を防止
     submittingRef.current = true
-    setTimeout(() => { submittingRef.current = false }, 1200)
+    if (!submitIdRef.current) submitIdRef.current = newUuid()
     const filledRows = shipments.filter(r => Number(r.cases) > 0)
-    onSave({
+    const res = await Promise.resolve(onSave({
+      id:          submitIdRef.current,
       field_id:    field.id,
       date:        form.date,
       variety:     form.variety.trim(),
@@ -7505,7 +7508,10 @@ function HarvestRecordForm({ field, lots, destinations, harvestRecords, onSave, 
       total_cases: totalCases,
       note:        form.note.trim(),
       checks:      form.checks,
-    })
+    })).catch(() => null)
+    if (!(res && res.ok === true)) { submittingRef.current = false; return } // 失敗: 入力と送信IDを保持
+    submitIdRef.current = null // 成功確定
+    setTimeout(() => { submittingRef.current = false }, 1200)
     celebrateSave('収穫を記録！🌾')
     setSaved(true)
     setTimeout(() => { setSaved(false); onCancel() }, 1500)
@@ -8145,7 +8151,7 @@ function HarvestRecordSection({ field, harvestRecords, lots, onSave, onDelete, d
           destinations: destinations || SHIPMENT_DESTINATIONS,
           harvestRecords,
           staff,
-          onSave: r => { onSave(r); setShowAddModal(false) },
+          onSave: r => onSave(r), // 閉じるのはフォーム側(handleSave)が成功時onCancelで
           onCancel: () => setShowAddModal(false)
         })
       )
