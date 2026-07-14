@@ -80,13 +80,16 @@
   // ── 農薬在庫管理 state（Step①: 新規追加） ──
   const [pesticides,        setPesticides,      reloadPesticides] = useFPS('farm_pesticides',         INITIAL_PESTICIDES)
   const [pesticideStock,    setPesticideStock]   = useFPS('farm_pesticide_stock',    INITIAL_PESTICIDE_STOCK)
-  const [pesticidePurchases,setPesticidePurchases] = useFPS('farm_pesticide_purchases', INITIAL_PESTICIDE_PURCHASES)
+  // 【仕入れ履歴DB化】履歴+在庫増加を単一RPC(farm_add_purchase_with_stock)で1トランザクション。routed時はDB・localhostはlocalStorage。
+  const pesticidePurchasesColl = useRecordCollection('farm_pesticide_purchases', farmKey, INITIAL_PESTICIDE_PURCHASES)
+  const pesticidePurchases = pesticidePurchasesColl.list
 
   // ── 【サンプル農園実データ統合 フェーズ1・Step1-1】肥料マスタ・肥料在庫・肥料仕入れ・追肥記録 state ──
   // 既存のpesticides系stateとは完全に独立（混在させない）
   const [fertilizers,         setFertilizers,     reloadFertilizers] = useFPS('farm_fertilizers',           INITIAL_FERTILIZERS)
   const [fertilizerStock,     setFertilizerStock]     = useFPS('farm_fertilizer_stock',      INITIAL_FERTILIZER_STOCK)
-  const [fertilizerPurchases, setFertilizerPurchases] = useFPS('farm_fertilizer_purchases',  INITIAL_FERTILIZER_PURCHASES)
+  const fertilizerPurchasesColl = useRecordCollection('farm_fertilizer_purchases', farmKey, INITIAL_FERTILIZER_PURCHASES)
+  const fertilizerPurchases = fertilizerPurchasesColl.list
   // 【在庫連動記録の切替第2弾】施肥は1行単位CRUD+在庫RPC(routed時)。畝ロット散布と同型。
   const topDressing = useRecordCollection('farm_top_dressing_records', farmKey, INITIAL_TOP_DRESSING_RECORDS)
   const topDressingRecords = topDressing.list
@@ -364,15 +367,15 @@
   // purchase.id=フォームのsubmitIdRefが保持する冪等キー(応答喪失→再送でも二重加算しない)
   const onAddPurchase = async (purchase) => {
     const entry = { ...purchase, id: purchase.id || newUuid() }
-    const pushHistory = () => setPesticidePurchases(prev =>
-      prev.some(x => String(x.id) === String(entry.id)) ? prev : [...prev, entry]) // 再送でも履歴1件
-    if (masterStockDb('farm_pesticides')) {
-      const res = await adjustStockDbRetry('pesticide', purchase.pesticide_id, 'delta', Number(purchase.amount_L) || 0, '仕入れ', entry.id)
-      if (res && res.ok) { pushHistory(); celebrateSave('仕入れを登録！'); reloadPesticides(); return { ok: true } }
-      try { showToast('在庫への反映に失敗しました。通信状態を確認してもう一度お試しください。', 'error') } catch (_) {}
+    // routed: 履歴insert+通帳記帳+残高更新を単一RPCで(1トランザクション・purchase.id冪等)
+    if (farmRepo.isPurchaseRouted && farmRepo.isPurchaseRouted('farm_pesticide_purchases')) {
+      const res = await pesticidePurchasesColl.addPurchase(entry)
+      if (res && res.ok) { celebrateSave('仕入れを登録！'); reloadPesticides(); return { ok: true } }
       return { ok: false, error: res && res.error }
     }
-    pushHistory()
+    // localStorage: 履歴追加(hook)＋在庫はアプリ側で加算(従来)
+    const res = await pesticidePurchasesColl.add(entry)
+    if (!(res && res.ok)) { try { showToast('仕入れの登録に失敗しました。', 'error') } catch (_) {}; return { ok: false, error: res && res.error } }
     setPesticideStock(prev => prev.map(s =>
       String(s.pesticide_id) === String(purchase.pesticide_id)
         ? { ...s, stock_L: Math.round((s.stock_L + Number(purchase.amount_L)) * 100) / 100 }
@@ -487,18 +490,16 @@
     setFertilizerStock(prev => prev.filter(s => String(s.fertilizer_id) !== String(id)))
   }
 
-  // 肥料仕入れ登録: 在庫反映の成功後にだけ購入履歴へ追記・祝福（onAddPurchaseと同パターン）
+  // 肥料仕入れ登録: 履歴+在庫増加を単一RPCで1トランザクション（onAddPurchaseと同パターン）
   const onAddFertilizerPurchase = async (purchase) => {
     const entry = { ...purchase, id: purchase.id || newUuid() }
-    const pushHistory = () => setFertilizerPurchases(prev =>
-      prev.some(x => String(x.id) === String(entry.id)) ? prev : [...prev, entry])
-    if (masterStockDb('farm_fertilizers')) {
-      const res = await adjustStockDbRetry('fertilizer', purchase.fertilizer_id, 'delta', Number(purchase.amount_kg) || 0, '仕入れ', entry.id)
-      if (res && res.ok) { pushHistory(); celebrateSave('仕入れを登録！'); reloadFertilizers(); return { ok: true } }
-      try { showToast('在庫への反映に失敗しました。通信状態を確認してもう一度お試しください。', 'error') } catch (_) {}
+    if (farmRepo.isPurchaseRouted && farmRepo.isPurchaseRouted('farm_fertilizer_purchases')) {
+      const res = await fertilizerPurchasesColl.addPurchase(entry)
+      if (res && res.ok) { celebrateSave('仕入れを登録！'); reloadFertilizers(); return { ok: true } }
       return { ok: false, error: res && res.error }
     }
-    pushHistory()
+    const res = await fertilizerPurchasesColl.add(entry)
+    if (!(res && res.ok)) { try { showToast('仕入れの登録に失敗しました。', 'error') } catch (_) {}; return { ok: false, error: res && res.error } }
     setFertilizerStock(prev => prev.map(s =>
       String(s.fertilizer_id) === String(purchase.fertilizer_id)
         ? { ...s, stock_kg: Math.round((s.stock_kg + Number(purchase.amount_kg)) * 100) / 100 }

@@ -17338,6 +17338,22 @@ function useRecordCollection(collection, farmId, initial) {
     }
     return res || { ok: false }
   }, [collection, farmId])
-  return { list, add, updateById, removeById, reload, addWithStock, updateWithStock, removeWithStock }
+  // 仕入れ登録(履歴+在庫を1トランザクション): farm_add_purchase_with_stock RPC。purchase.idが冪等キー。
+  // 楽観追加はID単位upsert(再送で重複追加しない)・失敗時は新規追加分のみロールバック。
+  const addPurchase = React.useCallback(async (purchase) => {
+    if (!loadedRef.current) return notLoaded()
+    const gen = genRef.current
+    const rec = Object.assign({}, purchase)
+    if (rec.id == null) rec.id = newUuid()
+    const existed = listRef.current.some(x => String(x.id) === String(rec.id))
+    setList(prev => existed ? prev.map(x => String(x.id) === String(rec.id) ? rec : x) : prev.concat([rec])) // 楽観的更新
+    const res = await Promise.resolve(farmRepo.addPurchaseWithStock(collection, farmId, rec)).catch(e => ({ ok: false, error: e }))
+    if (!res || !res.ok) {
+      if (genRef.current === gen && !existed) setList(prev => prev.filter(x => String(x.id) !== String(rec.id))) // ロールバック(新規分のみ)
+      try { showToast('仕入れの登録に失敗しました: ' + ((res && res.error && res.error.message) || '通信状態を確認してください'), 'error') } catch (_) {}
+    }
+    return res || { ok: false }
+  }, [collection, farmId])
+  return { list, add, updateById, removeById, reload, addWithStock, updateWithStock, removeWithStock, addPurchase }
 }
 

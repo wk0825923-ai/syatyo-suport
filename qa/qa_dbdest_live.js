@@ -429,6 +429,40 @@ const login = async (page) => {
     ok('C16: 収穫記録CRUDの本番往復(shipments jsonb/total_cases/checks往復・版ズレconflict保護・remove)',
       hvRes.c && hvRes.found && hvRes.ship && hvRes.total && hvRes.checks && hvRes.conflict && hvRes.stillThere && hvRes.d && hvRes.gone,
       JSON.stringify(hvRes))
+
+    // ── 仕入れ履歴DB化(farm_add_purchase_with_stock)=履歴insert+通帳記帳+残高更新が単一トランザクション・同一送信ID冪等 ──
+    const puRes = await A.evaluate(async () => {
+      const fid = CONFIG.CURRENT_FARM_ID
+      const farmRow = await sb.from('farm_farms').select('org_id').eq('id', fid).limit(1)
+      const orgId = farmRow.data[0].org_id
+      const pid = crypto.randomUUID()
+      await sb.from('farm_pesticides').insert([{ id: pid, org_id: orgId, farm_id: fid, name: 'QA-PU農薬(自動削除)', reg_no: 'QA', dilution: 1000, max_times: 3, preharvest_days: 7, stock_l: 10 }])
+      const purchaseId = crypto.randomUUID()
+      const purchase = { id: purchaseId, pesticide_id: pid, date: '2026-07-14', amount_L: 5, supplier: 'QA商店', price_yen: 3000 }
+      // 1回目: 履歴1件+在庫10→15+通帳1行
+      const r1 = await farmRepo.addPurchaseWithStock('farm_pesticide_purchases', fid, purchase)
+      const st1 = Number((await sb.from('farm_pesticides').select('stock_l').eq('id', pid)).data[0].stock_l)
+      const h1 = (await sb.from('farm_pesticide_purchases').select('id,amount_l,supplier').eq('id', purchaseId)).data
+      // 2回目: 同一purchase_idの再送→duplicate・在庫は動かない(15のまま)・履歴も1件のまま
+      const r2 = await farmRepo.addPurchaseWithStock('farm_pesticide_purchases', fid, purchase)
+      const st2 = Number((await sb.from('farm_pesticides').select('stock_l').eq('id', pid)).data[0].stock_l)
+      const hcount = (await sb.from('farm_pesticide_purchases').select('id').eq('pesticide_id', pid)).data.length
+      const mv = (await sb.from('farm_stock_movements').select('delta_amount,reason,record_collection').eq('item_id', pid)).data
+      // アプリのconverter経由で履歴が読めるか(一覧表示)
+      const listed = await farmRepo.readAsync('farm_pesticide_purchases_' + fid)
+      const shown = listed.ok ? (listed.value || []).find(x => String(x.id) === purchaseId) : null
+      // 片付け
+      await sb.from('farm_stock_movements').delete().eq('item_id', pid)
+      await sb.from('farm_pesticide_purchases').delete().eq('pesticide_id', pid)
+      await sb.from('farm_pesticides').delete().eq('id', pid)
+      return { r1: !!(r1 && r1.ok && !r1.duplicate), st1, hist1: !!(h1 && h1.length === 1 && Number(h1[0].amount_l) === 5 && h1[0].supplier === 'QA商店'),
+        dup: !!(r2 && r2.ok && r2.duplicate === true), st2, hcount, mvRows: mv ? mv.length : -1,
+        mvReason: mv && mv[0] ? (mv[0].reason === '仕入れ' && mv[0].record_collection === 'purchase') : false,
+        shownAmt: shown ? shown.amount_L : null }
+    })
+    ok('C17: 仕入れ履歴DB化(履歴+通帳+残高が単一RPC・在庫10→15・converter読み・同一送信ID再送はduplicate=15のまま/履歴1件/記帳1行)',
+      puRes.r1 && puRes.st1 === 15 && puRes.hist1 && puRes.dup && puRes.st2 === 15 && puRes.hcount === 1 && puRes.mvRows === 1 && puRes.mvReason && puRes.shownAmt === 5,
+      JSON.stringify(puRes))
   } finally {
     // 途中で例外終了してもテスト行を残さない（成功時は各検査内で消えているので実質no-op）
     try {

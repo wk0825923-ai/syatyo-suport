@@ -551,6 +551,47 @@
       },
       fromRows(rows) { return (rows || []).map(r => this.fromRow(r)) },
     },
+    // 仕入れ履歴(農薬): append-only(UIに編集/削除なし)。追加は farm_add_purchase_with_stock RPC で
+    // 履歴insert+通帳記帳+残高更新を1トランザクション。読みはfromRowsで一覧表示。recordCrud+purchaseRpc。
+    farm_pesticide_purchases: {
+      recordCrud: true,
+      purchaseRpc: 'pesticide', // 在庫連動の仕入れ=通常createでなくRPC。値=item_type
+      toRow(rec, ctx) { // localStorage経路のcreate用(routed時はRPCなので未使用)
+        return {
+          id: String(rec.id), org_id: ctx.orgId, farm_id: ctx.farmId,
+          pesticide_id: rec.pesticide_id != null ? String(rec.pesticide_id) : null,
+          date: /^\d{4}-\d{2}-\d{2}/.test(String(rec.date)) ? String(rec.date).slice(0, 10) : null,
+          amount_l: Number(rec.amount_L) || 0, supplier: String(rec.supplier == null ? '' : rec.supplier),
+          price_yen: (rec.price_yen == null || rec.price_yen === '') ? null : Number(rec.price_yen),
+        }
+      },
+      fromRow(r) {
+        return { id: r.id, pesticide_id: r.pesticide_id, date: r.date,
+          amount_L: r.amount_l != null ? Number(r.amount_l) : 0, supplier: r.supplier || '',
+          price_yen: r.price_yen != null ? Number(r.price_yen) : null }
+      },
+      fromRows(rows) { return (rows || []).map(r => this.fromRow(r)) },
+    },
+    // 仕入れ履歴(肥料): 農薬と同型。amount_kg。
+    farm_fertilizer_purchases: {
+      recordCrud: true,
+      purchaseRpc: 'fertilizer',
+      toRow(rec, ctx) {
+        return {
+          id: String(rec.id), org_id: ctx.orgId, farm_id: ctx.farmId,
+          fertilizer_id: rec.fertilizer_id != null ? String(rec.fertilizer_id) : null,
+          date: /^\d{4}-\d{2}-\d{2}/.test(String(rec.date)) ? String(rec.date).slice(0, 10) : null,
+          amount_kg: Number(rec.amount_kg) || 0, supplier: String(rec.supplier == null ? '' : rec.supplier),
+          price_yen: (rec.price_yen == null || rec.price_yen === '') ? null : Number(rec.price_yen),
+        }
+      },
+      fromRow(r) {
+        return { id: r.id, fertilizer_id: r.fertilizer_id, date: r.date,
+          amount_kg: r.amount_kg != null ? Number(r.amount_kg) : 0, supplier: r.supplier || '',
+          price_yen: r.price_yen != null ? Number(r.price_yen) : null }
+      },
+      fromRows(rows) { return (rows || []).map(r => this.fromRow(r)) },
+    },
     // 月別平均気温: アプリ形 [12ヶ月の数値] ⇔ DB1行(farm_idで一意・temps jsonb)。1農場1行のsingleton型
     farm_monthly_temps: {
       conflict: 'farm_id',
@@ -797,6 +838,29 @@
       } catch (e) { return { ok: false, error: e } }
     },
 
+    // 仕入れ登録: 履歴insert+通帳記帳+残高更新を farm_add_purchase_with_stock RPC で1トランザクション。
+    // purchase.id が冪等キー(同一送信IDの再送で二重加算しない)。collection の purchaseRpc が item_type。
+    async addPurchaseWithStock(collection, farmId, purchase) {
+      const conv = CONVERTERS[collection]; const client = getSb()
+      if (!conv || !conv.purchaseRpc) return { ok: false, error: new Error('仕入れRPC未対応: ' + collection) }
+      if (!client) return { ok: false, error: new Error('DB未接続') }
+      const bad = this._checkFarm(farmId); if (bad) return { ok: false, error: new Error(bad) }
+      const itemType = conv.purchaseRpc
+      const itemId = itemType === 'pesticide' ? purchase.pesticide_id : purchase.fertilizer_id
+      const amount = itemType === 'pesticide' ? Number(purchase.amount_L) : Number(purchase.amount_kg)
+      try {
+        const { data, error } = await client.rpc('farm_add_purchase_with_stock', {
+          p_item_type: itemType, p_item_id: itemId != null ? String(itemId) : null, p_farm_id: farmId,
+          p_purchase_id: String(purchase.id),
+          p_date: /^\d{4}-\d{2}-\d{2}/.test(String(purchase.date)) ? String(purchase.date).slice(0, 10) : null,
+          p_amount: amount, p_supplier: purchase.supplier == null ? '' : String(purchase.supplier),
+          p_price_yen: (purchase.price_yen == null || purchase.price_yen === '') ? null : Number(purchase.price_yen),
+        })
+        if (error) return { ok: false, error }
+        return data
+      } catch (e) { return { ok: false, error: e } }
+    },
+
     // 記録系のリアルタイム: 全件再読込ではなくINSERT/UPDATE/DELETEを1行ずつ通知（編集中UIを壊さない）
     subscribeRows(collection, farmId, cb) {
       const table = KEY_TABLE[collection], conv = CONVERTERS[collection], client = getSb()
@@ -875,6 +939,13 @@
       adjustStockDb(itemType, farmId, itemId, mode, amount, reason, refId) {
         return Promise.resolve(SupabaseRepository.adjustStock(itemType, farmId, itemId, mode, amount, reason, refId))
       },
+      // 仕入れ履歴のDB化: collectionがpurchaseRpc対応でルート済みか / 履歴+在庫を1トランザクションで追加
+      isPurchaseRouted(collection) { const r = routes[collection]; return !!(r && r.addPurchaseWithStock) },
+      addPurchaseWithStock(collection, farmId, purchase) {
+        const r = routes[collection]
+        if (r && r.addPurchaseWithStock) return Promise.resolve(r.addPurchaseWithStock(collection, farmId, purchase))
+        return Promise.resolve({ ok: false, error: new Error('仕入れRPC未ルート: ' + collection) })
+      },
       // 記録系のリアルタイム(1行単位)。localStorage経路は全量イベントをreplaceに変換して届ける
       subscribeRows(collection, farmId, cb) {
         const r = routes[collection] || LocalStorageRepository
@@ -891,7 +962,7 @@
   //   ?dbdest=1 で退避を解除。node(QAハーネス)ではrouteしない=テストが自分で管理する。
   //   localhost(ブラウザQAハーネス環境)は既定OFF: 約45本のハーネスがlocalStorage直注入の従来挙動を
   //   前提にしているため。localhostでDB経路を試す時だけ ?dbdest=1 を付ける。DB経路の検証はqa_dbdest_live担当。
-  const ROUTED_COLLECTIONS = ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records', 'farm_shipment_records', 'farm_pesticides', 'farm_fertilizers', 'farm_fields_v2', 'farm_lots', 'farm_lot_spray_records', 'farm_top_dressing_records', 'farm_records', 'farm_harvest_records']
+  const ROUTED_COLLECTIONS = ['farm_shipment_destinations', 'farm_gap_documents', 'farm_monthly_temps', 'farm_maintenance_records', 'farm_shipment_records', 'farm_pesticides', 'farm_fertilizers', 'farm_fields_v2', 'farm_lots', 'farm_lot_spray_records', 'farm_top_dressing_records', 'farm_records', 'farm_harvest_records', 'farm_pesticide_purchases', 'farm_fertilizer_purchases']
   try {
     if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
       const q = new URLSearchParams(window.location.search).get('dbdest')
