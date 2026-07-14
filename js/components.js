@@ -8755,12 +8755,19 @@ function FieldEvalTab({ field, fieldRecords, harvestRecords }) {
 // 緑×ゴールドのテーマに合わせたカスタム確認ダイアログ。
 // =====================================================
 function ConfirmDeleteModal({ title='削除しますか？', targetName, detail, onCancel, onConfirm }) {
-  // Escキーでキャンセルできるようにする
+  // 削除処理中は再クリック・Esc・背景クリック・キャンセルを一時無効化(通信が遅い時の二重送信=余分な競合通知を防ぐ)
+  const [busy, setBusy] = React.useState(false)
+  const handleConfirm = async () => {
+    if (busy) return
+    setBusy(true)
+    try { await Promise.resolve(onConfirm()) } catch (_) {}
+    setBusy(false) // 成功時は親がモーダルを閉じる(このコンポーネントはアンマウントされる)・失敗時は再操作可へ戻す
+  }
   React.useEffect(() => {
-    const onKey = e => { if (e.key === 'Escape') onCancel() }
+    const onKey = e => { if (e.key === 'Escape' && !busy) onCancel() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onCancel])
+  }, [onCancel, busy])
 
   return React.createElement('div', {
     style:{
@@ -8768,7 +8775,7 @@ function ConfirmDeleteModal({ title='削除しますか？', targetName, detail,
       display:'flex', alignItems:'center', justifyContent:'center', zIndex:10000,
       backdropFilter:'blur(2px)',
     },
-    onClick: e => { if (e.target === e.currentTarget) onCancel() }
+    onClick: e => { if (e.target === e.currentTarget && !busy) onCancel() }
   },
     React.createElement('div', {
       style:{
@@ -8807,21 +8814,25 @@ function ConfirmDeleteModal({ title='削除しますか？', targetName, detail,
       // ボタン
       React.createElement('div', { style:{ display:'flex', gap:'8px' } },
         React.createElement('button', {
-          onClick: onCancel,
+          onClick: () => { if (!busy) onCancel() },
+          disabled: busy,
           style:{
             flex:1, padding:'10px', borderRadius:'8px', border:'1.5px solid #D8E4D8',
-            background:'#fff', color:'#374151', fontSize:'13px', fontWeight:600, cursor:'pointer',
+            background:'#fff', color:'#374151', fontSize:'13px', fontWeight:600,
+            cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1,
           }
         }, 'キャンセル'),
         React.createElement('button', {
-          onClick: onConfirm,
+          onClick: handleConfirm,
+          disabled: busy,
           style:{
             flex:1, padding:'10px', borderRadius:'8px', border:'none',
-            background:'#DC2626', color:'#fff', fontSize:'13px', fontWeight:700, cursor:'pointer',
+            background:'#DC2626', color:'#fff', fontSize:'13px', fontWeight:700,
+            cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.7 : 1,
           },
-          onMouseEnter: e => { e.currentTarget.style.background='#B91C1C' },
-          onMouseLeave: e => { e.currentTarget.style.background='#DC2626' },
-        }, '削除する')
+          onMouseEnter: e => { if (!busy) e.currentTarget.style.background='#B91C1C' },
+          onMouseLeave: e => { if (!busy) e.currentTarget.style.background='#DC2626' },
+        }, busy ? '削除中…' : '削除する')
       )
     )
   )
