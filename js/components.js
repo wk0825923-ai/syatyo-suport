@@ -12766,6 +12766,23 @@ function StaffList({ staff, onAdd, onDelete, onUpdate }) {
 // 【日誌UX改善 Step2】技能実習生 作業日誌: 月次PDF出力（html2canvas利用）
 // 既存の exportCropPlanPDF と同じパターン（非表示プレビュー→キャプチャ→jsPDF）を流用
 // =====================================================
+// 技能実習日誌(参考様式第4-2号/規則第22条第1項第3号関係)の業務区分。公式左欄に直結。
+// 休日は「全暦日を埋める月次表示」で記録の無い日に使う。
+const TRAINEE_WORK_DIVISIONS = ['必須作業', '関連作業', '周辺作業', '安全衛生作業', '休日']
+// 実習区分(公式様式の注記 A〜F)。PDFに再現して監査提出に耐えるようにする。
+const TRAINEE_PLAN_CATEGORIES = [
+  ['A', '必須作業（技能等の習得に直接必要な作業）'],
+  ['B', '関連作業（必須作業に関連して行う作業）'],
+  ['C', '周辺作業（必須・関連作業に付随して通常携わる作業）'],
+  ['D', '安全衛生に係る作業'],
+  ['E', '休日'],
+  ['F', 'その他'],
+]
+// 後方互換: 旧データは自由記述 tasks 1欄。新データは work_content(従事した業務)/guidance_content(指導の内容)に分離。
+// 表示・PDFは常にこのヘルパー経由で読む(旧レコードは tasks を「従事した業務」として扱う)。
+function diaryWorkContent(d) { return (d && (d.work_content || d.tasks)) || '' }
+function diaryGuidance(d) { return (d && d.guidance_content) || '' }
+
 async function exportTraineeDiaryPDF(staffMember, monthLabel, diaryRows, summary) {
   if (!(await confirmDownload({ icon:'📄', title:'作業日誌をPDF出力', desc:(staffMember && staffMember.name ? staffMember.name + 'さんの' : '') + monthLabel + 'の作業日誌をPDFで出力します。', filename:'作業日誌_' + ((staffMember && staffMember.name) || '') + '_' + monthLabel + '.pdf' }))) return
   await ensurePdfLibs()
@@ -12774,63 +12791,89 @@ async function exportTraineeDiaryPDF(staffMember, monthLabel, diaryRows, summary
   const natLabel = NAT_LABEL
 
   const sortedRows = [...diaryRows].sort((a, b) => a.date.localeCompare(b.date))
+  const byDate = {}
+  sortedRows.forEach(d => { if (!byDate[d.date]) byDate[d.date] = d }) // 1日1件(複数あれば先頭)
+  const farmName = (typeof CONFIG !== 'undefined' && CONFIG.FARM_NAME) ? CONFIG.FARM_NAME : '' // プレースホルダ「農場名」直書きの不具合を修正
+  // monthLabel '2026年7月' から年月を取り、休日含む全暦日を並べる(公式様式は非稼働日も「休日」と1行記載)
+  const mMatch = String(monthLabel).match(/(\d{4})\D+(\d{1,2})/)
+  const yy = mMatch ? Number(mMatch[1]) : new Date().getFullYear()
+  const mo = mMatch ? Number(mMatch[2]) : (new Date().getMonth() + 1)
+  const daysInMonth = new Date(yy, mo, 0).getDate()
+  const ym = yy + '-' + String(mo).padStart(2, '0')
+  const divShort = { '必須作業':'必須', '関連作業':'関連', '周辺作業':'周辺', '安全衛生作業':'安全', '休日':'休日' }
+  const workMins = (d) => {
+    if (!d || !d.start_time || !d.end_time) return 0
+    const [sh, sm] = d.start_time.split(':').map(Number)
+    const [eh, em] = d.end_time.split(':').map(Number)
+    const t = (eh*60+em) - (sh*60+sm) - (d.break_minutes||0)
+    return t > 0 ? t : 0
+  }
+  let bodyRows = ''
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = ym + '-' + String(day).padStart(2, '0')
+    const wday = ['日','月','火','水','木','金','土'][new Date(dateStr + 'T00:00:00').getDay()]
+    const wcolor = wday === '日' ? '#DC2626' : wday === '土' ? '#1D4ED8' : '#555'
+    const d = byDate[dateStr]
+    const isHoliday = !d || d.work_division === '休日'
+    const bg = isHoliday ? 'background:#FBF3F3' : (day % 2 === 0 ? 'background:#f9f9f9' : '')
+    const mins = workMins(d)
+    const hh = Math.floor(mins/60), mm = mins%60
+    const work = d ? diaryWorkContent(d) : ''
+    const guide = d ? diaryGuidance(d) : ''
+    bodyRows += `<tr style="${bg}">
+      <td style="padding:4px 5px;border:1px solid #ccc;text-align:center;font-weight:600">${day}</td>
+      <td style="padding:4px 5px;border:1px solid #ccc;text-align:center;color:${wcolor}">${wday}</td>
+      <td style="padding:4px 5px;border:1px solid #ccc;text-align:center">${escHtml(d ? (divShort[d.work_division] || d.work_division || '必須') : '休日')}</td>
+      <td style="padding:4px 5px;border:1px solid #ccc;text-align:center">${escHtml((d && d.plan_no) || '')}</td>
+      <td style="padding:4px 6px;border:1px solid #ccc;white-space:pre-wrap">${work ? escHtml(work) : '<span style="color:#B91C1C">休日</span>'}</td>
+      <td style="padding:4px 6px;border:1px solid #ccc;white-space:pre-wrap">${escHtml(guide)}</td>
+      <td style="padding:4px 5px;border:1px solid #ccc;text-align:center">${mins ? hh+'h'+(mm?mm+'m':'') : '—'}</td>
+      <td style="padding:4px 5px;border:1px solid #ccc;text-align:center">${d && d.supervisor ? escHtml(d.supervisor) : '—'}</td>
+    </tr>`
+  }
+  const categoryNote = TRAINEE_PLAN_CATEGORIES.map(([k, v]) => `${k}: ${v}`).join('　')
 
   el.innerHTML = `
-    <div style="font-family:'Noto Sans JP','Hiragino Sans','Yu Gothic','Meiryo',sans-serif;padding:24px;background:#fff;color:#111;width:900px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+    <div style="font-family:'Noto Sans JP','Hiragino Sans','Yu Gothic','Meiryo',sans-serif;padding:22px;background:#fff;color:#111;width:960px">
+      <div style="font-size:9.5px;color:#666;text-align:right;margin-bottom:2px">参考様式第4-2号（規則第22条第1項第3号関係）</div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:12px;border-bottom:2px solid #1a5276;padding-bottom:8px">
         <div>
-          <h2 style="font-size:18px;font-weight:700;margin:0 0 4px">技能実習生 作業日誌（月次報告）</h2>
-          <div style="font-size:11px;color:#555">農園名: 農場名　／　対象月: ${monthLabel}　／　作成日: ${today}</div>
+          <h2 style="font-size:19px;font-weight:700;margin:0 0 4px">技能実習日誌</h2>
+          <div style="font-size:11px;color:#555">実習実施者（実習実施機関）: <b>${escHtml(farmName)}</b>　／　対象月: ${escHtml(monthLabel)}</div>
         </div>
-        <div style="font-size:10px;color:#888;text-align:right">技能実習制度 報告資料<br>在留資格管理用</div>
+        <div style="font-size:10px;color:#888;text-align:right">作成日: ${today}<br>技能実習制度 報告資料</div>
       </div>
 
-      <div style="display:flex;gap:10px;border:1px solid #ccc;border-radius:6px;padding:10px 14px;margin-bottom:14px;background:#F8FAF8">
-        <div style="flex:1"><div style="font-size:9px;color:#777">実習生</div><div style="font-size:13px;font-weight:700">${escHtml(staffMember.name)}</div></div>
-        <div style="flex:1"><div style="font-size:9px;color:#777">国籍</div><div style="font-size:13px;font-weight:700">${escHtml(natLabel[staffMember.nationality] || staffMember.nationality)}</div></div>
-        <div style="flex:1"><div style="font-size:9px;color:#777">記録日数</div><div style="font-size:13px;font-weight:700">${summary.count}日</div></div>
+      <div style="display:flex;gap:10px;border:1px solid #ccc;border-radius:6px;padding:9px 14px;margin-bottom:12px;background:#F8FAF8">
+        <div style="flex:1.4"><div style="font-size:9px;color:#777">技能実習生</div><div style="font-size:13px;font-weight:700">${escHtml(staffMember.name)}</div></div>
+        <div style="flex:1"><div style="font-size:9px;color:#777">国籍</div><div style="font-size:13px;font-weight:700">${escHtml(natLabel[staffMember.nationality] || staffMember.nationality || '—')}</div></div>
+        <div style="flex:1"><div style="font-size:9px;color:#777">従事日数</div><div style="font-size:13px;font-weight:700">${summary.count}日</div></div>
         <div style="flex:1"><div style="font-size:9px;color:#777">実働時間合計</div><div style="font-size:13px;font-weight:700">${summary.totalHours}h${summary.totalMins ? summary.totalMins+'m' : ''}</div></div>
       </div>
 
-      <table style="width:100%;border-collapse:collapse;font-size:10.5px">
+      <table style="width:100%;border-collapse:collapse;font-size:10px;table-layout:fixed">
         <thead>
           <tr style="background:#1a5276;color:#fff">
-            <th style="padding:6px 8px;border:1px solid #aaa;width:48px">日付</th>
-            <th style="padding:6px 8px;border:1px solid #aaa;width:36px">曜日</th>
-            <th style="padding:6px 8px;border:1px solid #aaa;width:90px">作業時間</th>
-            <th style="padding:6px 8px;border:1px solid #aaa;width:55px">実働</th>
-            <th style="padding:6px 8px;border:1px solid #aaa">作業内容</th>
-            <th style="padding:6px 8px;border:1px solid #aaa;width:60px">指導者</th>
+            <th style="padding:5px 4px;border:1px solid #aaa;width:34px">月日</th>
+            <th style="padding:5px 4px;border:1px solid #aaa;width:28px">曜</th>
+            <th style="padding:5px 4px;border:1px solid #aaa;width:44px">業務区分</th>
+            <th style="padding:5px 4px;border:1px solid #aaa;width:52px">実習計画番号</th>
+            <th style="padding:5px 4px;border:1px solid #aaa">従事した業務の内容</th>
+            <th style="padding:5px 4px;border:1px solid #aaa">指導の内容</th>
+            <th style="padding:5px 4px;border:1px solid #aaa;width:48px">実働</th>
+            <th style="padding:5px 4px;border:1px solid #aaa;width:58px">指導者</th>
           </tr>
         </thead>
-        <tbody>
-          ${sortedRows.length === 0
-            ? `<tr><td colspan="6" style="padding:18px;text-align:center;color:#999;border:1px solid #ddd">この月の記録はありません</td></tr>`
-            : sortedRows.map((d, i) => {
-                const dateObj = new Date(d.date + 'T00:00:00')
-                const wday = ['日','月','火','水','木','金','土'][dateObj.getDay()]
-                const mins = (() => {
-                  if (!d.start_time || !d.end_time) return 0
-                  const [sh, sm] = d.start_time.split(':').map(Number)
-                  const [eh, em] = d.end_time.split(':').map(Number)
-                  const t = (eh*60+em) - (sh*60+sm) - (d.break_minutes||0)
-                  return t > 0 ? t : 0
-                })()
-                const hh = Math.floor(mins/60), mm = mins%60
-                return `<tr style="${i%2===1?'background:#f9f9f9':''}">
-                  <td style="padding:5px 7px;border:1px solid #ddd;text-align:center;font-weight:600">${d.date.slice(8)}</td>
-                  <td style="padding:5px 7px;border:1px solid #ddd;text-align:center;color:${wday==='日'?'#DC2626':wday==='土'?'#1D4ED8':'#555'}">${wday}</td>
-                  <td style="padding:5px 7px;border:1px solid #ddd;text-align:center">${d.start_time}〜${d.end_time}</td>
-                  <td style="padding:5px 7px;border:1px solid #ddd;text-align:center">${hh}h${mm?mm+'m':''}</td>
-                  <td style="padding:5px 7px;border:1px solid #ddd;white-space:pre-wrap">${escHtml(d.tasks)}</td>
-                  <td style="padding:5px 7px;border:1px solid #ddd;text-align:center">${d.supervisor ? escHtml(d.supervisor) : '—'}</td>
-                </tr>`
-              }).join('')
-          }
-        </tbody>
+        <tbody>${bodyRows}</tbody>
       </table>
-      <div style="margin-top:14px;font-size:9px;color:#888;text-align:right">
-        ※ 本書類は技能実習制度に関する報告資料として作成　農場名
+
+      <div style="margin-top:10px;font-size:8.5px;color:#555;line-height:1.6;border:1px solid #ddd;border-radius:5px;padding:7px 10px;background:#FCFCFC">
+        <b>【業務区分】</b>${escHtml(categoryNote)}<br>
+        ※ 本日誌は技能実習の実施状況を記録するものです。休日を含む全ての暦日を記載しています。従事した業務・指導の内容は技能実習計画に基づき記入しています。
+      </div>
+      <div style="margin-top:8px;display:flex;justify-content:space-between;font-size:10px;color:#333">
+        <div>実習実施者: <b>${escHtml(farmName)}</b></div>
+        <div>技能実習指導員（署名）: ______________________</div>
       </div>
     </div>
   `
@@ -12864,7 +12907,12 @@ function TraineeDiaryPage({ staff, fields, diaries, onAdd, onDelete }) {
 
   const emptyForm = () => ({
     date: today, staff_id: selectedStaff, start_time:'08:00', end_time:'17:00',
-    break_minutes: 60, tasks:'', field_ids:[], supervisor:'', notes:''
+    break_minutes: 60,
+    work_division:'必須作業',   // 業務区分(公式左欄)
+    plan_no:'',                 // 実習計画の番号(実習実施予定表の内容欄番号)
+    work_content:'',            // 従事した業務(公式・従来tasksを分離)
+    guidance_content:'',        // 指導の内容(公式)
+    field_ids:[], supervisor:'', notes:'', tasks:''  // tasksは後方互換用(旧データ表示のため保持)
   })
 
   // スタッフ絞り込みのみ（月をまたいだ「全期間」リストが必要な場面向け）
@@ -12917,9 +12965,13 @@ function TraineeDiaryPage({ staff, fields, diaries, onAdd, onDelete }) {
 
   // ── 追加・編集フォームモーダル（共通） ──
   const DiaryFormModal = ({ initialValues, isEdit, onClose, onSave }) => {
-    const [form, setForm] = React.useState(initialValues)
+    // 旧データ(tasksのみ)を編集する時は「従事した業務」に引き継ぐ。区分の既定も補う
+    const [form, setForm] = React.useState(() => Object.assign({ work_division:'必須作業', plan_no:'', guidance_content:'' }, initialValues, {
+      work_content: (initialValues.work_content != null && initialValues.work_content !== '') ? initialValues.work_content : (initialValues.tasks || '')
+    }))
     const uf = (k, v) => setForm(f => ({ ...f, [k]: v }))
-    const canSave = form.date && form.staff_id && form.tasks.trim()
+    // 休日は従事業務が無くても保存可。それ以外は従事した業務が必須
+    const canSave = form.date && form.staff_id && (form.work_division === '休日' || (form.work_content || '').trim())
     const inputStyle = { width:'100%', padding:'8px 10px', borderRadius:'6px', border:'1px solid #D1D5DB', fontSize:'13px', color:'#111827', boxSizing:'border-box', outline:'none' }
     const labelStyle = { fontSize:'10px', fontWeight:700, color:'#64748B', textTransform:'uppercase', letterSpacing:'.05em', display:'block', marginBottom:'4px' }
     return React.createElement('div', {
@@ -12995,13 +13047,44 @@ function TraineeDiaryPage({ staff, fields, diaries, onAdd, onDelete }) {
           React.createElement('span', { style:{ fontSize:'13px', fontWeight:700, color:'#0A6B52' } }, calcWorkHours(form))
         ),
 
-        // 作業内容
+        // 業務区分・実習計画番号（公式様式に直結・2カラム）
+        React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'14px' } },
+          React.createElement('div', null,
+            React.createElement('label', { style: labelStyle }, '業務区分 *'),
+            React.createElement('select', {
+              value: form.work_division || '必須作業',
+              onChange: e => uf('work_division', e.target.value),
+              style: inputStyle
+            }, ...TRAINEE_WORK_DIVISIONS.map(v => React.createElement('option', { key:v, value:v }, v)))
+          ),
+          React.createElement('div', null,
+            React.createElement('label', { style: labelStyle }, '実習計画番号'),
+            React.createElement('input', {
+              type:'text', value: form.plan_no || '', placeholder:'例: ①〜⑤ / ②',
+              onChange: e => uf('plan_no', e.target.value),
+              style: inputStyle
+            })
+          )
+        ),
+
+        // 従事した業務（休日以外は必須）
         React.createElement('div', { style:{ marginBottom:'14px' } },
-          React.createElement('label', { style: labelStyle }, '作業内容 *'),
+          React.createElement('label', { style: labelStyle }, form.work_division === '休日' ? '従事した業務（休日は任意）' : '従事した業務 *'),
           React.createElement('textarea', {
-            value: form.tasks, rows:3,
-            onChange: e => uf('tasks', e.target.value),
-            placeholder:'例: 9号圃場 レタス収穫補助。サイズ選別・コンテナ積み込み作業。',
+            value: form.work_content || '', rows:3,
+            onChange: e => uf('work_content', e.target.value),
+            placeholder:'例: 9号圃場 レタス収穫。サイズ選別・コンテナ積み込み。',
+            style:{ ...inputStyle, resize:'vertical' }
+          })
+        ),
+
+        // 指導の内容（公式様式の右欄）
+        React.createElement('div', { style:{ marginBottom:'14px' } },
+          React.createElement('label', { style: labelStyle }, '指導の内容'),
+          React.createElement('textarea', {
+            value: form.guidance_content || '', rows:2,
+            onChange: e => uf('guidance_content', e.target.value),
+            placeholder:'例: 収穫適期の見極め方・出荷規格・衛生管理を指導。',
             style:{ ...inputStyle, resize:'vertical' }
           })
         ),
@@ -13033,7 +13116,11 @@ function TraineeDiaryPage({ staff, fields, diaries, onAdd, onDelete }) {
             style:{ flex:1, padding:'10px 18px', borderRadius:'6px', border:'1px solid #D1D5DB', background:'#fff', color:'#374151', fontSize:'13px', fontWeight:600, cursor:'pointer' }
           }, 'キャンセル'),
           React.createElement('button', {
-            onClick: () => { if (!canSave) { showToast('日付・実習生・作業内容を入力してください', 'warn'); return } onSave(form) },
+            onClick: () => {
+              if (!canSave) { showToast('日付・実習生・業務区分・従事した業務を入力してください（休日は業務任意）', 'warn'); return }
+              // tasksは後方互換のため従事業務を同期(旧集計・旧表示が落ちないように)
+              onSave(Object.assign({}, form, { work_content:(form.work_content||'').trim(), guidance_content:(form.guidance_content||'').trim(), tasks:(form.work_content||'').trim() }))
+            },
             style:{ flex:2, padding:'10px 18px', borderRadius:'6px', border:'none', fontSize:'13px', fontWeight:700, cursor: canSave ? 'pointer' : 'not-allowed',
               background: canSave ? (isEdit ? '#1D4ED8' : '#0A6B52') : '#D1D5DB', color:'#fff' }
           }, isEdit ? '変更を保存' : '日誌を登録')
@@ -13239,11 +13326,17 @@ function TraineeDiaryPage({ staff, fields, diaries, onAdd, onDelete }) {
                   React.createElement('div', { style:{ flex:1, minWidth:0 } },
                     React.createElement('div', { style:{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'5px', flexWrap:'wrap' } },
                       React.createElement('span', { style:{ fontSize:'13px', fontWeight:700, color:'#111827' } }, s ? s.name : `ID:${d.staff_id}`),
+                      d.work_division && React.createElement('span', {
+                        style:{ fontSize:'10px', fontWeight:700, padding:'2px 8px', borderRadius:'20px',
+                          background: d.work_division === '休日' ? '#FEF2F2' : '#EEF6F2', color: d.work_division === '休日' ? '#B91C1C' : '#0A6B52' }
+                      }, d.work_division),
+                      d.plan_no && React.createElement('span', { style:{ fontSize:'11px', color:'#6B7280' } }, `計画 ${d.plan_no}`),
                       React.createElement('span', { style:{ fontSize:'12px', color:'#6B7280' } },
                         `${d.start_time}〜${d.end_time}（休憩${d.break_minutes}分 / 実働 ${calcWorkHours(d)}）`
                       ),
                     ),
-                    React.createElement('div', { style:{ fontSize:'13px', color:'#374151', lineHeight:1.6, marginBottom:'4px' } }, d.tasks),
+                    React.createElement('div', { style:{ fontSize:'13px', color:'#374151', lineHeight:1.6, marginBottom:'4px' } }, diaryWorkContent(d) || '（休日）'),
+                    diaryGuidance(d) && React.createElement('div', { style:{ fontSize:'12px', color:'#0A6B52', lineHeight:1.5, marginBottom:'2px' } }, `指導: ${diaryGuidance(d)}`),
                     d.notes && React.createElement('div', { style:{ fontSize:'11px', color:'#9CA3AF' } }, `📝 ${d.notes}`),
                     d.supervisor && React.createElement('div', { style:{ fontSize:'11px', color:'#9CA3AF' } }, `👤 指導者: ${d.supervisor}`),
                   ),
@@ -13335,13 +13428,25 @@ function TraineeDiaryPage({ staff, fields, diaries, onAdd, onDelete }) {
               React.createElement('span', { style:{ color:'#6B7280' } }, '実働時間'),
               React.createElement('span', { style:{ fontWeight:700, color:'#0A6B52' } }, calcWorkHours(d))
             ),
+            d.work_division && React.createElement('div', { style:rowStyle2 },
+              React.createElement('span', { style:{ color:'#6B7280' } }, '業務区分'),
+              React.createElement('span', { style:{ fontWeight:600 } }, d.work_division)
+            ),
+            d.plan_no && React.createElement('div', { style:rowStyle2 },
+              React.createElement('span', { style:{ color:'#6B7280' } }, '実習計画番号'),
+              React.createElement('span', { style:{ fontWeight:600 } }, d.plan_no)
+            ),
             d.supervisor && React.createElement('div', { style:rowStyle2 },
               React.createElement('span', { style:{ color:'#6B7280' } }, '指導者'),
               React.createElement('span', null, d.supervisor)
             ),
-            React.createElement('div', { style:{ ...rowStyle2, alignItems:'flex-start', borderBottom:'none' } },
-              React.createElement('span', { style:{ color:'#6B7280', flexShrink:0 } }, '作業内容'),
-              React.createElement('span', { style:{ fontWeight:600, textAlign:'right', whiteSpace:'pre-wrap', lineHeight:1.6 } }, d.tasks || '—')
+            React.createElement('div', { style:{ ...rowStyle2, alignItems:'flex-start', borderBottom: diaryGuidance(d) ? '1px solid #F1F5F9' : 'none' } },
+              React.createElement('span', { style:{ color:'#6B7280', flexShrink:0 } }, '従事した業務'),
+              React.createElement('span', { style:{ fontWeight:600, textAlign:'right', whiteSpace:'pre-wrap', lineHeight:1.6 } }, diaryWorkContent(d) || '（休日）')
+            ),
+            diaryGuidance(d) && React.createElement('div', { style:{ ...rowStyle2, alignItems:'flex-start', borderBottom:'none' } },
+              React.createElement('span', { style:{ color:'#6B7280', flexShrink:0 } }, '指導の内容'),
+              React.createElement('span', { style:{ fontWeight:600, textAlign:'right', whiteSpace:'pre-wrap', lineHeight:1.6, color:'#0A6B52' } }, diaryGuidance(d))
             ),
           ),
 
