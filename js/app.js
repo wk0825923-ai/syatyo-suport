@@ -146,28 +146,37 @@
     if (r.work_type !== '定植') return
     const rows = Number(r.rows_worked) || 0
     if (rows <= 0) return
-    const existing = farmLots[r.field_id] || []
-    // 二重防御: この定植日報から既にロットを生成済みなら作らない(部分成功→再送で重複生成を防ぐ)
-    if (r.id != null && existing.some(l => l.source_record_id != null && String(l.source_record_id) === String(r.id))) return
-    const usedMax = existing.reduce((m, l) => {
-      const set = parseRowRange(l.row_range)
-      return set.size > 0 ? Math.max(m, ...set) : m
-    }, 0)
-    const start = usedMax + 1
-    const row_range = rows === 1 ? String(start) : start + '-' + (start + rows - 1)
     const seedlingDays = (r.seed_date && r.date)
       ? Math.round((new Date(r.date) - new Date(r.seed_date)) / 86400000)
       : null
-    onAddLot(r.field_id, {
-      row_range,
-      variety:              r.variety || '（品種未入力）',
-      seed_date:            r.seed_date || '',
-      transplant_date:      r.date,
-      transplant_count:     Number(r.tray_count) || null,
-      seedling_period_days: seedlingDays,
-      status:               'growing',
-      source_record_id:     r.id,  // 生成元の定植日報
+    // 二重防御は setFarmLots の関数更新内で source_record_id を再確認してから追加する。
+    // クロージャの farmLots(呼び出し時点)だけで判定すると、同時再送が再描画前に両方「まだ無い」と
+    // 判断して2ロット作る余地がある。関数更新はReactが直列化するので、2つ目は1つ目反映後のprevを見る。
+    let createdRange = null
+    setFarmLots(prev => {
+      const existing = prev[r.field_id] || []
+      if (r.id != null && existing.some(l => l.source_record_id != null && String(l.source_record_id) === String(r.id))) return prev // 既に生成済み
+      const usedMax = existing.reduce((m, l) => {
+        const set = parseRowRange(l.row_range)
+        return set.size > 0 ? Math.max(m, ...set) : m
+      }, 0)
+      const start = usedMax + 1
+      const row_range = rows === 1 ? String(start) : start + '-' + (start + rows - 1)
+      createdRange = row_range
+      const entry = {
+        id: newUuid(), // マスタUUID化: ロットIDもUUID(Date.now()は複数端末で衝突・DBのuuid列に入らない)
+        row_range,
+        variety:              r.variety || '（品種未入力）',
+        seed_date:            r.seed_date || '',
+        transplant_date:      r.date,
+        transplant_count:     Number(r.tray_count) || null,
+        seedling_period_days: seedlingDays,
+        status:               'growing',
+        source_record_id:     r.id,  // 生成元の定植日報(DB側も (farm_id, source_record_id) 一意制約で二重生成を弾く)
+      }
+      return { ...prev, [r.field_id]: [...existing, entry] }
     })
+    if (createdRange) extendRowCount(r.field_id, createdRange) // 生成した時だけ畝数を広げる
   }
 
   // ── 【フェーズE・E-4 Step5】収穫記録（出荷先別ケース数）state ──
