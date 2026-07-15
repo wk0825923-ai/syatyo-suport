@@ -42,7 +42,7 @@ const ok = (name, cond, extra) => checks.push({ name, pass: !!cond, extra: extra
       const stockOf = async (pid) => { const r = await sb.from('farm_pesticides').select('stock_l').eq('id', pid); return r.data && r.data[0] ? Number(r.data[0].stock_l) : null }
       // 期待使用量 = spray_volume_L ÷ dilution（RPCがサーバー側で同じ式で検証する）
       const mkRec = (id, pests, vol, note) => ({ id, org_id: orgId, farm_id: fid, field_id: null, date: '2026-07-12',
-        row_range: '1-3', spray_volume_l: vol == null ? 500 : vol, weather: '晴', note: note || 'QA-RPC(自動削除)', pesticides: pests, staff_ids: [], version: 1 })
+        row_range: '1-3', spray_volume_l: vol == null ? 500 : vol, weather: '晴', note: note || 'QA-RPC(自動削除)', pesticides: pests, staff_ids: [], checks: {}, version: 1 })
       const mv = (pid, d) => ({ item_type: 'pesticide', item_id: pid, delta_amount: d, unit: 'L', reason: '農薬散布' })
       const save = (rec, mov) => sb.rpc('farm_save_record_with_stock', { p_table: T, p_record: rec, p_movements: mov })
       const upd = (rec, mov, v) => sb.rpc('farm_update_record_with_stock', { p_table: T, p_record: rec, p_movements: mov, p_expected_version: v })
@@ -154,7 +154,7 @@ const ok = (name, cond, extra) => checks.push({ name, pass: !!cond, extra: extra
       // ── P26(v6 High): 施肥+肥料0件 → 拒否 ──
       const r26id = crypto.randomUUID()
       const s26 = await sb.rpc('farm_save_record_with_stock', { p_table: 'farm_top_dressing_records',
-        p_record: { id: r26id, org_id: orgId, farm_id: fid, field_id: null, date: '2026-07-13', row_range: '1-3', fertilizers: [], spray_volume_l: 500, note: 'QA', version: 1 },
+        p_record: { id: r26id, org_id: orgId, farm_id: fid, field_id: null, date: '2026-07-13', row_range: '1-3', fertilizers: [], spray_volume_l: 500, note: 'QA', staff_ids: [], checks: {}, version: 1 },
         p_movements: [] })
       const c26 = await sb.from('farm_top_dressing_records').select('id').eq('id', r26id)
       out.p26 = { errored: !!s26.error, recGone: c26.data && c26.data.length === 0 }
