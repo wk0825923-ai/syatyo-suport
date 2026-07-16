@@ -2,6 +2,13 @@
 
 新任のフルスタック担当者が最初に読むドキュメント。現状の到達点・技術的負債・最初にやるべきことをまとめる。
 
+> **⚠ 2026-07-17 追記（現状との差分）**: 本書の一部は Supabase フルスタック移行**前**の記述。最新の引き継ぎは 2026-07-14 版の引き継ぎ資料 PDF（フルスタック移行 引き継ぎ資料／ロードマップ／在庫RPC設計図）を正とする。
+> - **P0（業務データが localStorage）は解消済み**: 15 コレクションが Supabase 稼働（記録6種＋マスタ群＋在庫通帳＋仕入れ履歴＋GAP文書台帳＋月別気温）。アーキテクチャは hook → Router（`ROUTED_COLLECTIONS`）→ Repository → converter → DB/RPC（`js/repository.js` 周辺）。
+> - migration 運用: **正本は Supabase**。`db/migrations/*.sql` は同名同内容の控え（自動適用されない）。変更時は Supabase 適用→同一 SQL を控えに残す二重化を厳守。
+> - 本番 live QA: `qa/qa_dbdest_live.js`（C1〜C18）／`qa/qa_rpc_live.js`（P0〜P28）。mac 実行は `CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"` 指定。2026-07-17 時点で C系24/24・P系27/27 全緑を実証済み。
+> - 未接続（テーブルのみ用意・スコープ外）: スタッフ／GAPチェック／作付計画・サイクル／機器予約／今日のタスク／技能実習日誌／各種コメント。
+> - 下記 P1〜P3・未確定業務仕様・Gotchas は引き続き有効。
+
 ## 1. 現状サマリー
 - **動く MVP／初期導入版**。本番稼働中（Vercel / `main`）、デモアカウントで全機能操作可。
 - E2E 回帰（`qa/`）で 20 圃場シナリオを含めクラッシュ 0 を確認済み。
